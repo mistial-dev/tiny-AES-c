@@ -19,6 +19,7 @@ option(TINY_AES_ENABLE_CCM "Enable CCM mode in the main library" OFF)
 option(TINY_AES_ENABLE_EAX "Enable EAX mode in the main library" OFF)
 option(TINY_AES_ENABLE_EAX_PRIME "Enable ANSI C12.22 EAX' mode in the main library" OFF)
 option(TINY_AES_ENABLE_SIV "Enable AES-SIV (RFC 5297) in the main library" OFF)
+option(TINY_AES_ENABLE_CMAC "Enable AES-CMAC (SP 800-38B) in the main library" OFF)
 option(TINY_AES_CAVP "Run the complete AES CAVP response corpora" OFF)
 option(TINY_AES_WIDE_OPS "Enable portable native-width block helpers" OFF)
 option(TINY_AES_ZEROIZE "Wipe stack secrets in one-shot paths" ON)
@@ -110,6 +111,11 @@ if(TINY_AES_ENABLE_SIV)
 else()
     set(TINY_AES_SIV 0)
 endif()
+if(TINY_AES_ENABLE_CMAC)
+    set(TINY_AES_CMAC 1)
+else()
+    set(TINY_AES_CMAC 0)
+endif()
 if(TINY_AES_CAVP)
     set(TINY_AES_CAVP_DEFINITION 1)
 else()
@@ -138,6 +144,7 @@ list(APPEND tiny_aes_library_definitions GCM=${TINY_AES_GCM}
     CCM=${TINY_AES_CCM}
     EAX_PRIME=${TINY_AES_EAX_PRIME}
     SIV=${TINY_AES_SIV}
+    CMAC=${TINY_AES_CMAC}
     AES_ZEROIZE=${TINY_AES_ZEROIZE_VALUE}
     AES_STRICT=${TINY_AES_STRICT_VALUE}
     AES_TINY=${TINY_AES_TINY_VALUE}
@@ -166,6 +173,7 @@ if(TINY_AES_BUILD_TESTS)
         set(eax_mode ${eax})
         set(eax_prime_mode 0)
         set(siv_mode 0)
+        set(cmac_mode 0)
         if(mode STREQUAL "ecb")
             set(ecb 1)
         elseif(mode STREQUAL "cbc")
@@ -181,12 +189,15 @@ if(TINY_AES_BUILD_TESTS)
             set(ofb 1)
             set(eax_mode 1)
             set(siv_mode 1)
+            set(cmac_mode 1)
         elseif(mode STREQUAL "eax")
             set(eax_mode 1)
         elseif(mode STREQUAL "eax-prime")
             set(eax_prime_mode 1)
         elseif(mode STREQUAL "siv")
             set(siv_mode 1)
+        elseif(mode STREQUAL "cmac")
+            set(cmac_mode 1)
         elseif(NOT mode STREQUAL "ccm" AND NOT mode STREQUAL "gcm")
             message(FATAL_ERROR "Unknown AES test mode: ${mode}")
         endif()
@@ -212,18 +223,27 @@ if(TINY_AES_BUILD_TESTS)
             set(hardware_definition)
         endif()
 
-        set(test_name "${key}-${mode}-gcm${gcm}-ccm${ccm}-eax${eax_mode}-eaxprime${eax_prime_mode}-siv${siv_mode}-ghash${ghash_index}-${sbox_mode}-wide${wide}-cavp${cavp}")
-        add_library(test_core_${test_name} OBJECT aes.c test.c cavp.c eax_test.c siv_test.c)
+        set(test_name "${key}-${mode}-gcm${gcm}-ccm${ccm}-eax${eax_mode}-eaxprime${eax_prime_mode}-siv${siv_mode}-cmac${cmac_mode}-ghash${ghash_index}-${sbox_mode}-wide${wide}-cavp${cavp}")
+        add_library(test_core_${test_name} OBJECT aes.c test.c cavp.c eax_test.c siv_test.c cmac_test.c)
         target_include_directories(test_core_${test_name} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+        # CAVP includes Tlen=4/5; lower floor only in CMAC-enabled test objects.
+        if(cmac_mode)
+            set(cmac_min_tag AES_CMAC_MIN_TAG_LEN=4)
+        else()
+            set(cmac_min_tag)
+        endif()
         target_compile_definitions(test_core_${test_name} PRIVATE
-            CBC=${cbc} ECB=${ecb} CTR=${ctr} OFB=${ofb} GCM=${gcm} CCM=${ccm} EAX=${eax_mode} EAX_PRIME=${eax_prime_mode} SIV=${siv_mode}
+            CBC=${cbc} ECB=${ecb} CTR=${ctr} OFB=${ofb} GCM=${gcm} CCM=${ccm} EAX=${eax_mode} EAX_PRIME=${eax_prime_mode} SIV=${siv_mode} CMAC=${cmac_mode}
             AES_CAVP=${cavp}
             AES_GCM_GHASH_MODE=${ghash_index}
             ${key_definition} ${sbox_definition} AES_WIDE_OPS=${wide}
             ${hardware_definition}
+            ${cmac_min_tag}
             CAVP_VECTOR_DIR=\"${CMAKE_CURRENT_LIST_DIR}/test_vectors/cavp\"
             EAX_VECTOR_FILE=\"${CMAKE_CURRENT_LIST_DIR}/test_vectors/eax/aes_eax_test.json\"
             SIV_VECTOR_FILE=\"${CMAKE_CURRENT_LIST_DIR}/test_vectors/siv/aead_aes_siv_cmac_test.json\"
+            CMAC_WYCHEPROOF_FILE=\"${CMAKE_CURRENT_LIST_DIR}/test_vectors/cmac/aes_cmac_test.json\"
+            CMAC_CAVP_DIR=\"${CMAKE_CURRENT_LIST_DIR}/test_vectors/cmac\"
         )
 
         add_executable(test_aes_${test_name}
@@ -283,6 +303,10 @@ if(TINY_AES_BUILD_TESTS)
 
         foreach(sbox_mode IN ITEMS secure runtime fast)
             add_tiny_aes_test(${key} siv 0 0 0 auto ${sbox_mode} 0 0)
+        endforeach()
+
+        foreach(sbox_mode IN ITEMS secure runtime fast)
+            add_tiny_aes_test(${key} cmac 0 0 0 auto ${sbox_mode} 0 0)
         endforeach()
 
         if(NOT TINY_AES_CAVP)

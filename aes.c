@@ -5,7 +5,7 @@
  *
 
 This is an implementation of the AES algorithm, specifically ECB, CTR, CBC, OFB,
-CCM, EAX, and GCM modes.
+CCM, EAX, GCM, SIV, and CMAC modes.
 Block size can be chosen in aes.h - available choices are AES128, AES192, AES256.
 
 The implementation is verified against the test vectors in:
@@ -85,6 +85,7 @@ NOTE:   String length must be evenly divisible by 16byte (str_len % 16 == 0)
     (defined(EAX) && EAX == 1) || \
     (defined(EAX_PRIME) && EAX_PRIME == 1) || \
     (defined(SIV) && SIV == 1) || \
+    (defined(CMAC) && CMAC == 1) || \
     (defined(AES_CAVP) && AES_CAVP == 1)
 /* state - intermediate AES state during encryption/decryption. */
 typedef uint8_t state_t[4][4];
@@ -452,6 +453,7 @@ void AES_ctx_set_iv(struct AES_ctx* ctx, const uint8_t* iv)
     (defined(EAX) && EAX == 1) || \
     (defined(EAX_PRIME) && EAX_PRIME == 1) || \
     (defined(SIV) && SIV == 1) || \
+    (defined(CMAC) && CMAC == 1) || \
     (defined(AES_CAVP) && AES_CAVP == 1)
 
 /* This function adds the round key to state. */
@@ -2219,10 +2221,11 @@ int AES_EAX_PRIME_decrypt(const uint8_t* key, const uint8_t* cleartext,
 
 #endif // EAX or EAX_PRIME
 
-#if defined(SIV) && (SIV == 1)
+/* AES-CMAC (SP 800-38B) shared by public CMAC and SIV-S2V. */
+#if (defined(CMAC) && (CMAC == 1)) || (defined(SIV) && (SIV == 1))
 
-/* RFC 5297 dbl(): left-shift in GF(2^128), poly x^128+x^7+x^2+x+1. */
-static void siv_dbl(uint8_t value[AES_BLOCKLEN])
+/* Left-shift in GF(2^128), poly x^128+x^7+x^2+x+1 (SP 800-38B / RFC 5297). */
+static void aes_cmac_dbl(uint8_t value[AES_BLOCKLEN])
 {
   uint8_t carry = 0;
   uint8_t i;
@@ -2238,10 +2241,10 @@ static void siv_dbl(uint8_t value[AES_BLOCKLEN])
 }
 
 /*
- * AES-CMAC (SP 800-38B) over the concatenation of two segments without a
- * heap copy. Second segment may be empty (b_len == 0).
+ * CMAC over the concatenation of two segments without a heap copy.
+ * Second segment may be empty (b_len == 0).
  */
-static void siv_cmac_concat(const uint8_t* round_key,
+static void aes_cmac_concat(const uint8_t* round_key,
                             const uint8_t* a, size_t a_len,
                             const uint8_t* b, size_t b_len,
                             uint8_t out[AES_BLOCKLEN])
@@ -2257,9 +2260,9 @@ static void siv_cmac_concat(const uint8_t* round_key,
 
   Cipher((state_t*)L, round_key);
   aes_copy_bytes(K1, L, AES_BLOCKLEN);
-  siv_dbl(K1);
+  aes_cmac_dbl(K1);
   aes_copy_bytes(K2, K1, AES_BLOCKLEN);
-  siv_dbl(K2);
+  aes_cmac_dbl(K2);
 
   if (total == 0)
   {
@@ -2322,11 +2325,62 @@ done:
 #endif
 }
 
-static void siv_cmac(const uint8_t* round_key, const uint8_t* data,
+static void aes_cmac(const uint8_t* round_key, const uint8_t* data,
                      size_t length, uint8_t out[AES_BLOCKLEN])
 {
-  siv_cmac_concat(round_key, data, length, NULL, 0, out);
+  aes_cmac_concat(round_key, data, length, NULL, 0, out);
 }
+
+#if defined(CMAC) && (CMAC == 1)
+
+int AES_CMAC(const uint8_t* key, const uint8_t* msg, size_t msg_len,
+             uint8_t* tag, size_t tag_len)
+{
+  struct AES_ctx ctx;
+  uint8_t full[AES_BLOCKLEN];
+
+  if (key == NULL || tag == NULL ||
+      tag_len < AES_CMAC_MIN_TAG_LEN || tag_len > AES_CMAC_TAG_MAX ||
+      (msg_len != 0 && msg == NULL))
+    return AES_ERR;
+
+  AES_init_ctx(&ctx, key);
+  /* Empty message: msg may be NULL; core only reads when length > 0. */
+  aes_cmac(ctx.RoundKey, msg, msg_len, full);
+  aes_copy_bytes(tag, full, tag_len);
+
+#if AES_ZEROIZE
+  AES_secure_zero(full, sizeof(full));
+  AES_ctx_clear(&ctx);
+#endif
+  return AES_OK;
+}
+
+int AES_CMAC_verify(const uint8_t* key, const uint8_t* msg, size_t msg_len,
+                    const uint8_t* tag, size_t tag_len)
+{
+  uint8_t computed[AES_CMAC_TAG_MAX];
+  uint8_t difference = 0;
+  size_t i;
+
+  if (tag == NULL ||
+      tag_len < AES_CMAC_MIN_TAG_LEN || tag_len > AES_CMAC_TAG_MAX)
+    return AES_ERR;
+  if (AES_CMAC(key, msg, msg_len, computed, tag_len) != AES_OK)
+    return AES_ERR;
+
+  for (i = 0; i < tag_len; ++i)
+    difference |= (uint8_t)(computed[i] ^ tag[i]);
+
+#if AES_ZEROIZE
+  AES_secure_zero(computed, sizeof(computed));
+#endif
+  return difference == 0 ? AES_OK : AES_ERR;
+}
+
+#endif /* CMAC */
+
+#if defined(SIV) && (SIV == 1)
 
 static void siv_s2v(const uint8_t* k1_round, const uint8_t* const* ad,
                     const size_t* ad_lens, size_t ad_count,
@@ -2339,12 +2393,12 @@ static void siv_s2v(const uint8_t* k1_round, const uint8_t* const* ad,
   size_t i;
   const uint8_t zero[AES_BLOCKLEN] = { 0 };
 
-  siv_cmac(k1_round, zero, AES_BLOCKLEN, d);
+  aes_cmac(k1_round, zero, AES_BLOCKLEN, d);
   for (i = 0; i < ad_count; ++i)
   {
     uint8_t j;
-    siv_cmac(k1_round, ad[i] != NULL ? ad[i] : zero, ad_lens[i], tmp);
-    siv_dbl(d);
+    aes_cmac(k1_round, ad[i] != NULL ? ad[i] : zero, ad_lens[i], tmp);
+    aes_cmac_dbl(d);
     for (j = 0; j < AES_BLOCKLEN; ++j)
       d[j] ^= tmp[j];
   }
@@ -2355,7 +2409,7 @@ static void siv_s2v(const uint8_t* k1_round, const uint8_t* const* ad,
     aes_copy_bytes(last_block, last + (last_len - AES_BLOCKLEN), AES_BLOCKLEN);
     for (i = 0; i < AES_BLOCKLEN; ++i)
       last_block[i] ^= d[i];
-    siv_cmac_concat(k1_round, last, last_len - AES_BLOCKLEN,
+    aes_cmac_concat(k1_round, last, last_len - AES_BLOCKLEN,
                     last_block, AES_BLOCKLEN, v);
   }
   else
@@ -2364,14 +2418,14 @@ static void siv_s2v(const uint8_t* k1_round, const uint8_t* const* ad,
     uint8_t t[AES_BLOCKLEN];
     uint8_t j;
     aes_copy_bytes(t, d, AES_BLOCKLEN);
-    siv_dbl(t);
+    aes_cmac_dbl(t);
     memset(tmp, 0, AES_BLOCKLEN);
     if (last_len != 0 && last != NULL)
       aes_copy_bytes(tmp, last, last_len);
     tmp[last_len] = 0x80;
     for (j = 0; j < AES_BLOCKLEN; ++j)
       t[j] ^= tmp[j];
-    siv_cmac(k1_round, t, AES_BLOCKLEN, v);
+    aes_cmac(k1_round, t, AES_BLOCKLEN, v);
 #if AES_ZEROIZE
     AES_secure_zero(t, sizeof(t));
 #endif
@@ -2532,3 +2586,5 @@ int AES_SIV_decrypt(const uint8_t* key,
 }
 
 #endif /* SIV */
+
+#endif /* CMAC || SIV */

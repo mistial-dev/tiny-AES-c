@@ -16,6 +16,7 @@ AES_ENABLE_CCM ?= 0
 AES_ENABLE_EAX ?= 0
 AES_ENABLE_EAX_PRIME ?= 0
 AES_ENABLE_SIV ?= 0
+AES_ENABLE_CMAC ?= 0
 AES_CAVP ?= 0
 AES_ZEROIZE ?= 1
 AES_STRICT ?= 0
@@ -46,7 +47,7 @@ endif
 MODE_DEFINITIONS = -DCBC=$(AES_ENABLE_CBC) -DECB=$(AES_ENABLE_ECB) \
   -DCTR=$(AES_ENABLE_CTR) -DOFB=$(AES_ENABLE_OFB) -DGCM=$(AES_ENABLE_GCM) \
   -DCCM=$(AES_ENABLE_CCM) -DEAX=$(AES_ENABLE_EAX) -DEAX_PRIME=$(AES_ENABLE_EAX_PRIME) \
-  -DSIV=$(AES_ENABLE_SIV)
+  -DSIV=$(AES_ENABLE_SIV) -DCMAC=$(AES_ENABLE_CMAC)
 ifeq ($(AES_GCM_GHASH_MODE),auto)
 GHASH_DEFINITION = -DAES_GCM_GHASH_MODE=0
 GHASH_MODE = 0
@@ -94,21 +95,25 @@ benchmark: benchmark.c aes.c aes.h
 test:
 	@set -e; \
 	mkdir -p $(TEST_BUILD_DIR); \
-	$(CC) $(CFLAGS) -UCBC -UECB -UCTR -UOFB -UGCM -UCCM -UEAX -USIV -UAES_CAVP -UAES_GCM_GHASH_MODE -c munit.c -o $(TEST_BUILD_DIR)/munit.o; \
+	$(CC) $(CFLAGS) -UCBC -UECB -UCTR -UOFB -UGCM -UCCM -UEAX -USIV -UCMAC -UAES_CAVP -UAES_GCM_GHASH_MODE -c munit.c -o $(TEST_BUILD_DIR)/munit.o; \
 	build_and_run() { \
 	  key=$$1; mode=$$2; cbc=$$3; ecb=$$4; ctr=$$5; ofb=$$6; gcm=$$7; ccm=$$8; eax=$$9; ghash=$${10}; sbox=$${11}; wide=$${12}; \
-	  prime=0; siv=0; \
+	  prime=0; siv=0; cmac=0; \
 	  if [ "$${mode}" = eax-prime ]; then prime=1; fi; \
 	  if [ "$${mode}" = siv ]; then siv=1; fi; \
-	  name=$${key}-$${mode}-gcm$${gcm}-ccm$${ccm}-eax$${eax}-eaxprime$${prime}-siv$${siv}-ghash$${ghash}-sbox$${sbox}-wide$${wide}-cavp$(AES_CAVP); \
-	  common="$(CFLAGS) -DCBC=$${cbc} -DECB=$${ecb} -DCTR=$${ctr} -DOFB=$${ofb} -DGCM=$${gcm} -DCCM=$${ccm} -DEAX=$${eax} -DEAX_PRIME=$${prime} -DSIV=$${siv} -DAES_CAVP=$(AES_CAVP) -DAES$${key}=1 -DAES_SBOX_MODE=$${sbox} -DAES_WIDE_OPS=$${wide} -DAES_GCM_GHASH_MODE=$${ghash} -DCAVP_VECTOR_DIR=\"test_vectors/cavp\" -DEAX_VECTOR_FILE=\"test_vectors/eax/aes_eax_test.json\" -DSIV_VECTOR_FILE=\"test_vectors/siv/aead_aes_siv_cmac_test.json\""; \
+	  if [ "$${mode}" = cmac ]; then cmac=1; fi; \
+	  if [ "$${mode}" = all ]; then siv=1; cmac=1; fi; \
+	  name=$${key}-$${mode}-gcm$${gcm}-ccm$${ccm}-eax$${eax}-eaxprime$${prime}-siv$${siv}-cmac$${cmac}-ghash$${ghash}-sbox$${sbox}-wide$${wide}-cavp$(AES_CAVP); \
+	  common="$(CFLAGS) -DCBC=$${cbc} -DECB=$${ecb} -DCTR=$${ctr} -DOFB=$${ofb} -DGCM=$${gcm} -DCCM=$${ccm} -DEAX=$${eax} -DEAX_PRIME=$${prime} -DSIV=$${siv} -DCMAC=$${cmac} -DAES_CAVP=$(AES_CAVP) -DAES$${key}=1 -DAES_SBOX_MODE=$${sbox} -DAES_WIDE_OPS=$${wide} -DAES_GCM_GHASH_MODE=$${ghash} -DCAVP_VECTOR_DIR=\"test_vectors/cavp\" -DEAX_VECTOR_FILE=\"test_vectors/eax/aes_eax_test.json\" -DSIV_VECTOR_FILE=\"test_vectors/siv/aead_aes_siv_cmac_test.json\" -DCMAC_WYCHEPROOF_FILE=\"test_vectors/cmac/aes_cmac_test.json\" -DCMAC_CAVP_DIR=\"test_vectors/cmac\""; \
+	  if [ "$${cmac}" = 1 ]; then common="$${common} -DAES_CMAC_MIN_TAG_LEN=4"; fi; \
 	  if [ "$${ghash}" = 5 ]; then common="$${common} -DAES_GCM_GHASH_HARDWARE_MULTIPLY=AES_CAVP_GHASH_HARDWARE_MULTIPLY"; fi; \
 	  $(CC) $${common} -c aes.c -o $(TEST_BUILD_DIR)/aes-$${name}.o; \
 	  $(CC) $${common} -c test.c -o $(TEST_BUILD_DIR)/test-$${name}.o; \
 	  $(CC) $${common} -c cavp.c -o $(TEST_BUILD_DIR)/cavp-$${name}.o; \
 	  $(CC) $${common} -c eax_test.c -o $(TEST_BUILD_DIR)/eax-test-$${name}.o; \
 	  $(CC) $${common} -c siv_test.c -o $(TEST_BUILD_DIR)/siv-test-$${name}.o; \
-	  $(CC) $(CFLAGS) -o $(TEST_BUILD_DIR)/test-$${name} $(TEST_BUILD_DIR)/aes-$${name}.o $(TEST_BUILD_DIR)/test-$${name}.o $(TEST_BUILD_DIR)/cavp-$${name}.o $(TEST_BUILD_DIR)/eax-test-$${name}.o $(TEST_BUILD_DIR)/siv-test-$${name}.o $(TEST_BUILD_DIR)/munit.o; \
+	  $(CC) $${common} -c cmac_test.c -o $(TEST_BUILD_DIR)/cmac-test-$${name}.o; \
+	  $(CC) $(CFLAGS) -o $(TEST_BUILD_DIR)/test-$${name} $(TEST_BUILD_DIR)/aes-$${name}.o $(TEST_BUILD_DIR)/test-$${name}.o $(TEST_BUILD_DIR)/cavp-$${name}.o $(TEST_BUILD_DIR)/eax-test-$${name}.o $(TEST_BUILD_DIR)/siv-test-$${name}.o $(TEST_BUILD_DIR)/cmac-test-$${name}.o $(TEST_BUILD_DIR)/munit.o; \
 	  $(TEST_BUILD_DIR)/test-$${name}; \
 	}; \
 	for key in 128 192 256; do \
@@ -121,25 +126,27 @@ test:
 	  for sbox in 1 2 3; do build_and_run $$key eax 0 0 0 0 0 0 1 0 $$sbox 0; done; \
 	  if [ "$$key" -eq 128 ]; then for sbox in 1 2 3; do build_and_run $$key eax-prime 0 0 0 0 0 0 0 0 $$sbox 0; done; fi; \
 	  for sbox in 1 2 3; do build_and_run $$key siv 0 0 0 0 0 0 0 0 $$sbox 0; done; \
+	  for sbox in 1 2 3; do build_and_run $$key cmac 0 0 0 0 0 0 0 0 $$sbox 0; done; \
 	  if [ "$(AES_CAVP)" -eq 0 ]; then build_and_run $$key all 1 1 1 1 1 1 1 0 1 1; fi; \
 	done; \
 	# Sparse config-profile builds (not multiplied across the mode matrix). \
-	$(CC) $(CFLAGS) -UCBC -UECB -UCTR -UOFB -UGCM -UCCM -UEAX -USIV -c munit.c -o $(TEST_BUILD_DIR)/munit.o; \
+	$(CC) $(CFLAGS) -UCBC -UECB -UCTR -UOFB -UGCM -UCCM -UEAX -USIV -UCMAC -c munit.c -o $(TEST_BUILD_DIR)/munit.o; \
 	run_cfg() { \
 	  name=$$1; shift; \
-	  common="$(CFLAGS) $$* -DCAVP_VECTOR_DIR=\"test_vectors/cavp\" -DEAX_VECTOR_FILE=\"test_vectors/eax/aes_eax_test.json\" -DSIV_VECTOR_FILE=\"test_vectors/siv/aead_aes_siv_cmac_test.json\""; \
+	  common="$(CFLAGS) $$* -DCAVP_VECTOR_DIR=\"test_vectors/cavp\" -DEAX_VECTOR_FILE=\"test_vectors/eax/aes_eax_test.json\" -DSIV_VECTOR_FILE=\"test_vectors/siv/aead_aes_siv_cmac_test.json\" -DCMAC_WYCHEPROOF_FILE=\"test_vectors/cmac/aes_cmac_test.json\" -DCMAC_CAVP_DIR=\"test_vectors/cmac\""; \
 	  $(CC) $${common} -c aes.c -o $(TEST_BUILD_DIR)/aes-cfg-$${name}.o; \
 	  $(CC) $${common} -c test.c -o $(TEST_BUILD_DIR)/test-cfg-$${name}.o; \
 	  $(CC) $${common} -c cavp.c -o $(TEST_BUILD_DIR)/cavp-cfg-$${name}.o; \
 	  $(CC) $${common} -c eax_test.c -o $(TEST_BUILD_DIR)/eax-cfg-$${name}.o; \
 	  $(CC) $${common} -c siv_test.c -o $(TEST_BUILD_DIR)/siv-cfg-$${name}.o; \
-	  $(CC) $(CFLAGS) -o $(TEST_BUILD_DIR)/test-cfg-$${name} $(TEST_BUILD_DIR)/aes-cfg-$${name}.o $(TEST_BUILD_DIR)/test-cfg-$${name}.o $(TEST_BUILD_DIR)/cavp-cfg-$${name}.o $(TEST_BUILD_DIR)/eax-cfg-$${name}.o $(TEST_BUILD_DIR)/siv-cfg-$${name}.o $(TEST_BUILD_DIR)/munit.o; \
+	  $(CC) $${common} -c cmac_test.c -o $(TEST_BUILD_DIR)/cmac-cfg-$${name}.o; \
+	  $(CC) $(CFLAGS) -o $(TEST_BUILD_DIR)/test-cfg-$${name} $(TEST_BUILD_DIR)/aes-cfg-$${name}.o $(TEST_BUILD_DIR)/test-cfg-$${name}.o $(TEST_BUILD_DIR)/cavp-cfg-$${name}.o $(TEST_BUILD_DIR)/eax-cfg-$${name}.o $(TEST_BUILD_DIR)/siv-cfg-$${name}.o $(TEST_BUILD_DIR)/cmac-cfg-$${name}.o $(TEST_BUILD_DIR)/munit.o; \
 	  $(TEST_BUILD_DIR)/test-cfg-$${name}; \
 	}; \
-	run_cfg strict-ctr -DCBC=0 -DECB=0 -DCTR=1 -DOFB=0 -DGCM=0 -DCCM=0 -DEAX=0 -DEAX_PRIME=0 -DSIV=0 -DAES128=1 -DAES_STRICT=1 -DAES_ZEROIZE=1 -DAES_SBOX_MODE=1 -DAES_WIDE_OPS=0; \
-	run_cfg zeroize-off -DCBC=0 -DECB=0 -DCTR=1 -DOFB=0 -DGCM=0 -DCCM=0 -DEAX=0 -DEAX_PRIME=0 -DSIV=0 -DAES128=1 -DAES_STRICT=0 -DAES_ZEROIZE=0 -DAES_SBOX_MODE=1 -DAES_WIDE_OPS=0; \
-	run_cfg tiny-gcm -DCBC=0 -DECB=0 -DCTR=0 -DOFB=0 -DGCM=1 -DCCM=0 -DEAX=0 -DEAX_PRIME=0 -DSIV=0 -DAES128=1 -DAES_TINY=1 -DAES_GCM_GHASH_MODE=0 -DAES_SBOX_MODE=1 -DAES_WIDE_OPS=0; \
-	run_cfg multi-gcm -DCBC=0 -DECB=0 -DCTR=0 -DOFB=0 -DGCM=1 -DCCM=0 -DEAX=0 -DEAX_PRIME=0 -DSIV=0 -DAES128=1 -DAES_GCM_GHASH_MODE=0 -DAES_SBOX_MODE=1 -DAES_WIDE_OPS=0 -DGCM_MULTI_KEY_TEST=1
+	run_cfg strict-ctr -DCBC=0 -DECB=0 -DCTR=1 -DOFB=0 -DGCM=0 -DCCM=0 -DEAX=0 -DEAX_PRIME=0 -DSIV=0 -DCMAC=0 -DAES128=1 -DAES_STRICT=1 -DAES_ZEROIZE=1 -DAES_SBOX_MODE=1 -DAES_WIDE_OPS=0; \
+	run_cfg zeroize-off -DCBC=0 -DECB=0 -DCTR=1 -DOFB=0 -DGCM=0 -DCCM=0 -DEAX=0 -DEAX_PRIME=0 -DSIV=0 -DCMAC=0 -DAES128=1 -DAES_STRICT=0 -DAES_ZEROIZE=0 -DAES_SBOX_MODE=1 -DAES_WIDE_OPS=0; \
+	run_cfg tiny-gcm -DCBC=0 -DECB=0 -DCTR=0 -DOFB=0 -DGCM=1 -DCCM=0 -DEAX=0 -DEAX_PRIME=0 -DSIV=0 -DCMAC=0 -DAES128=1 -DAES_TINY=1 -DAES_GCM_GHASH_MODE=0 -DAES_SBOX_MODE=1 -DAES_WIDE_OPS=0; \
+	run_cfg multi-gcm -DCBC=0 -DECB=0 -DCTR=0 -DOFB=0 -DGCM=1 -DCCM=0 -DEAX=0 -DEAX_PRIME=0 -DSIV=0 -DCMAC=0 -DAES128=1 -DAES_GCM_GHASH_MODE=0 -DAES_SBOX_MODE=1 -DAES_WIDE_OPS=0 -DGCM_MULTI_KEY_TEST=1
 
 clean:
 	rm -f aes.o

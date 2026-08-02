@@ -4,8 +4,10 @@ SPDX-FileCopyrightText: Mistial Dev
 SPDX-License-Identifier: Unlicense
 -->
 
-[![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](unlicense.txt)
-[![Build Status](https://img.shields.io/badge/tests-passing-brightgreen.svg)](https://github.com/mistial-dev/tiny-AES-c/actions)
+[![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](https://unlicense.org)
+[![CI](https://github.com/mistial-dev/tiny-AES-c/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/mistial-dev/tiny-AES-c/actions/workflows/ci.yml)
+[![C99](https://img.shields.io/badge/C-99-00599C?logo=c&logoColor=white)](https://en.cppreference.com/w/c/language)
+[![Heap-free](https://img.shields.io/badge/heap-free-informational)](#overview)
 
 # Tiny AES in C
 
@@ -30,6 +32,7 @@ so unused algorithms do not contribute code or context fields:
 | EAX′ | off | ANSI C12.22 authenticated encryption |
 | GCM | off | Streaming AEAD plus one-shot helpers |
 | SIV | off | Deterministic / nonce-misuse-resistant AEAD (RFC 5297) |
+| CMAC | off | Message authentication (NIST SP 800-38B) |
 
 Key size is fixed at compile time: define `AES192` or `AES256`, otherwise
 AES-128 is selected.
@@ -52,7 +55,7 @@ cmake -S . -B build -DTINY_AES_ENABLE_CBC=ON -DTINY_AES_ENABLE_GCM=ON
 ```
 
 Direct inclusion: define `CBC`, `ECB`, `CTR`, `OFB`, `GCM`, `CCM`, `EAX`,
-and/or `EAX_PRIME` to `1` before including `aes.h`.
+`EAX_PRIME`, `SIV`, and/or `CMAC` to `1` before including `aes.h`.
 
 ### Security and size profiles
 
@@ -64,6 +67,7 @@ and/or `EAX_PRIME` to `1` before including `aes.h`.
 | `AES_STRICT` | 0 | NULL checks on classical buffer APIs |
 | `AES_TINY` | 0 | `#error` if GHASH is table4/fast-table |
 | `AES_EAX_MIN_TAG_LEN` | 8 | Minimum EAX tag length |
+| `AES_CMAC_MIN_TAG_LEN` | 8 | Min CMAC tag bytes (product); CAVP tests use 4 for full corpus |
 | `AES_GCM_GHASH_MODE` | auto | bitwise / wide / table4 / fast-table / hardware |
 
 Make examples:
@@ -139,6 +143,12 @@ int  AES_SIV_encrypt(const uint8_t *key,
                      const uint8_t *pt, size_t pt_len,
                      uint8_t v[16], uint8_t *ct);
 int  AES_SIV_decrypt(...);
+
+/* CMAC=1: SP 800-38B; tag_len is AES_CMAC_MIN_TAG_LEN..16 (default min 8). */
+int  AES_CMAC(const uint8_t *key, const uint8_t *msg, size_t msg_len,
+              uint8_t *tag, size_t tag_len);
+int  AES_CMAC_verify(const uint8_t *key, const uint8_t *msg, size_t msg_len,
+                     const uint8_t *tag, size_t tag_len);
 ```
 
 C++ projects should include `aes.hpp`.
@@ -218,6 +228,17 @@ uint8_t ct[pt_len];
 if (AES_SIV_encrypt(key, ad, ad_lens, 2, pt, pt_len, v, ct) != AES_OK)
     return -1;
 /* Auth failure wipes the plaintext buffer (no large temp on MCU). */
+```
+
+### CMAC (SP 800-38B, one-shot)
+
+```c
+uint8_t tag[16];
+/* Full tag, or truncate to >= AES_CMAC_MIN_TAG_LEN (default 8) leading octets. */
+if (AES_CMAC(key, msg, msg_len, tag, sizeof tag) != AES_OK)
+    return -1;
+if (AES_CMAC_verify(key, msg, msg_len, tag, 8) != AES_OK)
+    return -1; /* constant-time compare of truncated tag */
 ```
 
 ### GCM one-shot (preferred for whole messages)
@@ -320,9 +341,10 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-Unit tests use vendored µunit. Vectors include NIST SP 800-38A samples, CCM/GCM
-CAVP corpora (optional full run), EAX Appendix G / Wycheproof, and C12.22 EAX′
-notes under `test_vectors/`.
+Unit tests use vendored µunit. Vectors under `test_vectors/` include NIST SP
+800-38A samples; CCM/GCM CAVP (optional full run); EAX Appendix G / Wycheproof;
+C12.22 EAX′ notes; SIV RFC 5297 / Wycheproof; and full AES-CMAC CAVP Gen/Ver
+plus Wycheproof.
 
 ## License
 

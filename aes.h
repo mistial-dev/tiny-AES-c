@@ -17,7 +17,8 @@
  * Mode selection (define to 1/0 before including this header, or via -D).
  *
  * Default build enables CTR only. CBC, ECB, OFB, CCM, EAX, EAX_PRIME, GCM,
- * and SIV are opt-in so unused modes do not contribute code or context fields.
+ * SIV, and CMAC are opt-in so unused modes do not contribute code or context
+ * fields.
  */
 #ifndef CBC
   #define CBC 0
@@ -55,6 +56,10 @@
   #define SIV 0
 #endif
 
+#ifndef CMAC
+  #define CMAC 0
+#endif
+
 /* When 1 (default), one-shot paths wipe stack key material on exit. */
 #ifndef AES_ZEROIZE
   #define AES_ZEROIZE 1
@@ -76,6 +81,19 @@
 /* Minimum EAX tag length (not used by EAX'). Override only for exotic vectors. */
 #ifndef AES_EAX_MIN_TAG_LEN
   #define AES_EAX_MIN_TAG_LEN 8
+#endif
+
+/*
+ * Minimum CMAC tag length in bytes. SP 800-38B recommends Tlen >= 64 bits for
+ * most applications; shorter tags need careful risk analysis. Default matches
+ * AES_EAX_MIN_TAG_LEN. Override only for exotic vectors / CAVP short-tag rows.
+ */
+#ifndef AES_CMAC_MIN_TAG_LEN
+  #define AES_CMAC_MIN_TAG_LEN 8
+#endif
+
+#if (AES_CMAC_MIN_TAG_LEN < 1) || (AES_CMAC_MIN_TAG_LEN > 16)
+  #error "AES_CMAC_MIN_TAG_LEN must be in 1..16"
 #endif
 
 /*
@@ -368,6 +386,27 @@ int AES_EAX_PRIME_decrypt(const uint8_t* key, const uint8_t* cleartext,
                           size_t ciphertext_len,
                           const uint8_t tag[AES_EAX_PRIME_TAG_LEN],
                           uint8_t* plaintext);
+
+#endif
+
+#if defined(CMAC) && (CMAC == 1)
+
+/* Full CMAC tag is one AES block; shorter tags are the leading tag_len bytes. */
+#define AES_CMAC_TAG_MAX AES_BLOCKLEN
+
+/*
+ * AES-CMAC (NIST SP 800-38B). Heap-free one-shot.
+ * tag_len must be in AES_CMAC_MIN_TAG_LEN..AES_CMAC_TAG_MAX (default min 8;
+ * SP 800-38B truncation: most significant octets of the full T). Empty
+ * message: msg may be NULL when msg_len is 0. Stack secrets wiped when
+ * AES_ZEROIZE=1.
+ */
+int AES_CMAC(const uint8_t* key, const uint8_t* msg, size_t msg_len,
+             uint8_t* tag, size_t tag_len);
+
+/* Constant-time verify of a (possibly truncated) tag. */
+int AES_CMAC_verify(const uint8_t* key, const uint8_t* msg, size_t msg_len,
+                    const uint8_t* tag, size_t tag_len);
 
 #endif
 

@@ -34,11 +34,16 @@ SPDX-License-Identifier: Unlicense
 
 ### Added
 
+- Opt-in **AES-CMAC** (NIST SP 800-38B): heap-free one-shot `AES_CMAC` /
+  `AES_CMAC_verify` with truncated tags (`AES_CMAC_MIN_TAG_LEN`..16; product
+  default min 8). Shares the CMAC core with SIV. Full NIST CAVP AES Gen/Ver
+  corpora and full Wycheproof `aes_cmac_test.json`; CMAC test builds use
+  `AES_CMAC_MIN_TAG_LEN=4` so CAVP short-tag rows hit the public API.
 - Opt-in **AES-SIV** (RFC 5297 SIV-AES / AES-SIV-CMAC-256/384/512): heap-free
   one-shot encrypt/decrypt with multi-component associated data. Coverage from
   RFC 5297 Appendix A and vendored Wycheproof `aead_aes_siv_cmac_test.json`.
 - `AES_secure_zero` and `AES_ctx_clear`; `AES_ZEROIZE` (default on) wipes stack
-  secrets in one-shot CCM/EAX/EAX'/GCM/SIV paths.
+  secrets in one-shot CCM/EAX/EAX'/GCM/SIV/CMAC paths.
 - `AES_STRICT` optional NULL checks on classical buffer APIs.
 - One-shot `AES_GCM_encrypt` / `AES_GCM_decrypt` (auth-before-release decrypt).
 - `AES_TINY` compile-time rejection of table4/fast-table GHASH.
