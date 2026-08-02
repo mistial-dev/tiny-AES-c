@@ -1,5 +1,7 @@
 /*
  * SPDX-License-Identifier: Unlicense
+ * SPDX-FileCopyrightText: kokke
+ * SPDX-FileCopyrightText: Mistial Dev
  *
  * Unit tests for tiny-AES-c using munit: https://nemequ.github.io/munit/
  */

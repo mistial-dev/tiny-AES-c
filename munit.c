@@ -1,4 +1,8 @@
-/* Copyright (c) 2013-2018 Evan Nemerson <evan@nemerson.com>
+/*
+ * SPDX-FileCopyrightText: 2013-2018 Evan Nemerson
+ * SPDX-License-Identifier: MIT
+ *
+ * Copyright (c) 2013-2018 Evan Nemerson <evan@nemerson.com>
  *
  * Permission is hereby granted, free of charge, to any person
  * obtaining a copy of this software and associated documentation

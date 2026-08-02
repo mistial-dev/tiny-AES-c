@@ -1,3 +1,8 @@
+/*
+ * SPDX-FileCopyrightText: kokke
+ * SPDX-FileCopyrightText: Mistial Dev
+ * SPDX-License-Identifier: Unlicense
+ */
 #ifndef _AES_HPP_
 #define _AES_HPP_
 

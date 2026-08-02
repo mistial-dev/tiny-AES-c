@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: kokke
+# SPDX-FileCopyrightText: Mistial Dev
+# SPDX-License-Identifier: Unlicense
+
 CC ?= cc
 CFLAGS ?= -Wall -Wextra -O2 -std=c99 -I.
 

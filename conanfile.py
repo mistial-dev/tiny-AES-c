@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: kokke
+# SPDX-FileCopyrightText: Mistial Dev
+# SPDX-License-Identifier: Unlicense
+
 from conans import ConanFile, CMake
 from conans.errors import ConanException
 

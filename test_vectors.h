@@ -1,5 +1,7 @@
 /*
  * SPDX-License-Identifier: Unlicense
+ * SPDX-FileCopyrightText: kokke
+ * SPDX-FileCopyrightText: Mistial Dev
  *
  * NIST SP 800-38A Appendix F test vectors.
  */

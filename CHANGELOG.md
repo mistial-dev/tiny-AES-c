@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: kokke
+SPDX-FileCopyrightText: Mistial Dev
+SPDX-License-Identifier: Unlicense
+-->
+
 # Changelog
 
 ## Unreleased

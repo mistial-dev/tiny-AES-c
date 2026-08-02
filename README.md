@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: kokke
+SPDX-FileCopyrightText: Mistial Dev
+SPDX-License-Identifier: Unlicense
+-->
+
 ![CI](https://github.com/mistial-dev/tiny-AES-C/actions/workflows/c-cpp.yml/badge.svg)
 ### Tiny AES in C
 

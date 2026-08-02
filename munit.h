@@ -1,4 +1,8 @@
-/* µnit Testing Framework
+/*
+ * SPDX-FileCopyrightText: 2013-2017 Evan Nemerson
+ * SPDX-License-Identifier: MIT
+ *
+ * µnit Testing Framework
  * Copyright (c) 2013-2017 Evan Nemerson <evan@nemerson.com>
  *
  * Permission is hereby granted, free of charge, to any person

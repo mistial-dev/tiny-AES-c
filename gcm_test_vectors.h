@@ -1,5 +1,7 @@
 /*
  * SPDX-License-Identifier: Unlicense
+ * SPDX-FileCopyrightText: kokke
+ * SPDX-FileCopyrightText: Mistial Dev
  *
  * Compact samples from the NIST CAVP AES-GCM vectors distributed with:
  * https://github.com/mko-x/SharedAES-GCM/tree/master/Sources/gcm_test_vectors
