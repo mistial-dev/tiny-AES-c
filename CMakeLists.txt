@@ -16,6 +16,7 @@ option(TINY_AES_ENABLE_CTR "Enable CTR mode in the main library" ON)
 option(TINY_AES_ENABLE_OFB "Enable OFB mode in the main library" OFF)
 option(TINY_AES_ENABLE_GCM "Enable GCM mode in the main library" OFF)
 option(TINY_AES_ENABLE_CCM "Enable CCM mode in the main library" OFF)
+option(TINY_AES_ENABLE_EAX "Enable EAX mode in the main library" OFF)
 option(TINY_AES_CAVP "Run the complete AES CAVP response corpora" OFF)
 option(TINY_AES_WIDE_OPS "Enable portable native-width block helpers" OFF)
 set(TINY_AES_SBOX_MODE "secure" CACHE STRING "S-box mode: secure, runtime, or fast")
@@ -46,12 +47,13 @@ else()
     set(TINY_AES_WIDE_DEFINITION AES_WIDE_OPS=0)
 endif()
 
-function(tiny_aes_mode_definitions output cbc ecb ctr ofb)
+function(tiny_aes_mode_definitions output cbc ecb ctr ofb eax)
     set(${output}
         CBC=${cbc}
         ECB=${ecb}
         CTR=${ctr}
         OFB=${ofb}
+        EAX=${eax}
         ${TINY_AES_SBOX_DEFINITION}
         ${TINY_AES_WIDE_DEFINITION}
         PARENT_SCOPE
@@ -88,6 +90,11 @@ if(TINY_AES_ENABLE_CCM)
 else()
     set(TINY_AES_CCM 0)
 endif()
+if(TINY_AES_ENABLE_EAX)
+    set(TINY_AES_EAX 1)
+else()
+    set(TINY_AES_EAX 0)
+endif()
 if(TINY_AES_CAVP)
     set(TINY_AES_CAVP_DEFINITION 1)
 else()
@@ -95,7 +102,8 @@ else()
 endif()
 
 tiny_aes_mode_definitions(tiny_aes_library_definitions
-    ${TINY_AES_CBC} ${TINY_AES_ECB} ${TINY_AES_CTR} ${TINY_AES_OFB})
+    ${TINY_AES_CBC} ${TINY_AES_ECB} ${TINY_AES_CTR} ${TINY_AES_OFB}
+    ${TINY_AES_EAX})
 list(APPEND tiny_aes_library_definitions GCM=${TINY_AES_GCM}
     CCM=${TINY_AES_CCM}
     ${TINY_AES_GCM_GHASH_DEFINITION})
@@ -115,11 +123,12 @@ if(TINY_AES_BUILD_TESTS)
 
     add_library(tiny-aes-munit OBJECT munit.c)
 
-    function(add_tiny_aes_test key mode gcm ccm ghash_mode sbox_mode wide cavp)
+    function(add_tiny_aes_test key mode gcm ccm eax ghash_mode sbox_mode wide cavp)
         set(cbc 0)
         set(ecb 0)
         set(ctr 0)
         set(ofb 0)
+        set(eax_mode ${eax})
         if(mode STREQUAL "ecb")
             set(ecb 1)
         elseif(mode STREQUAL "cbc")
@@ -133,6 +142,9 @@ if(TINY_AES_BUILD_TESTS)
             set(ecb 1)
             set(ctr 1)
             set(ofb 1)
+            set(eax_mode 1)
+        elseif(mode STREQUAL "eax")
+            set(eax_mode 1)
         elseif(NOT mode STREQUAL "ccm" AND NOT mode STREQUAL "gcm")
             message(FATAL_ERROR "Unknown AES test mode: ${mode}")
         endif()
@@ -158,16 +170,17 @@ if(TINY_AES_BUILD_TESTS)
             set(hardware_definition)
         endif()
 
-        set(test_name "${key}-${mode}-gcm${gcm}-ccm${ccm}-ghash${ghash_index}-${sbox_mode}-wide${wide}-cavp${cavp}")
-        add_library(test_core_${test_name} OBJECT aes.c test.c cavp.c)
+        set(test_name "${key}-${mode}-gcm${gcm}-ccm${ccm}-eax${eax_mode}-ghash${ghash_index}-${sbox_mode}-wide${wide}-cavp${cavp}")
+        add_library(test_core_${test_name} OBJECT aes.c test.c cavp.c eax_test.c)
         target_include_directories(test_core_${test_name} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
         target_compile_definitions(test_core_${test_name} PRIVATE
-            CBC=${cbc} ECB=${ecb} CTR=${ctr} OFB=${ofb} GCM=${gcm} CCM=${ccm}
+            CBC=${cbc} ECB=${ecb} CTR=${ctr} OFB=${ofb} GCM=${gcm} CCM=${ccm} EAX=${eax_mode}
             AES_CAVP=${cavp}
             AES_GCM_GHASH_MODE=${ghash_index}
             ${key_definition} ${sbox_definition} AES_WIDE_OPS=${wide}
             ${hardware_definition}
             CAVP_VECTOR_DIR=\"${CMAKE_CURRENT_LIST_DIR}/test_vectors/cavp\"
+            EAX_VECTOR_FILE=\"${CMAKE_CURRENT_LIST_DIR}/test_vectors/eax/aes_eax_test.json\"
         )
 
         add_executable(test_aes_${test_name}
@@ -196,7 +209,7 @@ if(TINY_AES_BUILD_TESTS)
                 string(REPLACE ":" ";" profile_values "${profile}")
                 list(GET profile_values 0 sbox_mode)
                 list(GET profile_values 1 wide)
-                add_tiny_aes_test(${key} ${mode} 0 0 auto ${sbox_mode} ${wide} ${cavp})
+                add_tiny_aes_test(${key} ${mode} 0 0 0 auto ${sbox_mode} ${wide} ${cavp})
             endforeach()
         endforeach()
 
@@ -204,7 +217,7 @@ if(TINY_AES_BUILD_TESTS)
             string(REPLACE ":" ";" profile_values "${profile}")
             list(GET profile_values 0 sbox_mode)
             list(GET profile_values 1 wide)
-            add_tiny_aes_test(${key} ccm 0 1 auto ${sbox_mode} ${wide} ${cavp})
+            add_tiny_aes_test(${key} ccm 0 1 0 auto ${sbox_mode} ${wide} ${cavp})
         endforeach()
 
         foreach(profile IN LISTS gcm_profiles)
@@ -212,11 +225,15 @@ if(TINY_AES_BUILD_TESTS)
             list(GET profile_values 0 sbox_mode)
             list(GET profile_values 1 wide)
             list(GET profile_values 2 ghash_mode)
-            add_tiny_aes_test(${key} gcm 1 0 ${ghash_mode} ${sbox_mode} ${wide} ${cavp})
+            add_tiny_aes_test(${key} gcm 1 0 0 ${ghash_mode} ${sbox_mode} ${wide} ${cavp})
+        endforeach()
+
+        foreach(sbox_mode IN ITEMS secure runtime fast)
+            add_tiny_aes_test(${key} eax 0 0 1 auto ${sbox_mode} 0 0)
         endforeach()
 
         if(NOT TINY_AES_CAVP)
-            add_tiny_aes_test(${key} all 1 1 auto secure 1 0)
+            add_tiny_aes_test(${key} all 1 1 1 auto secure 1 0)
         endif()
     endforeach()
 endif()

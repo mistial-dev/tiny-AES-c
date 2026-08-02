@@ -17,6 +17,7 @@
 // CCM enables one-shot authenticated encryption in CCM mode.
 // ECB enables the basic ECB 16-byte block algorithm. Modes can be enabled simultaneously.
 // GCM enables streaming authenticated encryption in GCM mode.
+// EAX enables one-shot authenticated encryption in EAX mode.
 
 // The #ifndef-guard allows it to be configured before #include'ing or at compile time.
 #ifndef CBC
@@ -41,6 +42,10 @@
 
 #ifndef CCM
   #define CCM 0
+#endif
+
+#ifndef EAX
+  #define EAX 0
 #endif
 
 /* GCM GHASH implementation profiles. */
@@ -253,6 +258,24 @@ int AES_CCM_decrypt(const uint8_t* key, const uint8_t* nonce,
                     const uint8_t* ciphertext, size_t ciphertext_len,
                     const uint8_t* tag, size_t tag_len,
                     uint8_t* plaintext);
+
+#endif
+
+#if defined(EAX) && (EAX == 1)
+
+#define AES_EAX_SUCCESS 0
+#define AES_EAX_ERROR   (-1)
+
+/* EAX supports arbitrary nonce, AAD, message, and tag lengths up to one
+ * AES block. Authentication failure leaves plaintext output untouched. */
+int AES_EAX_encrypt(const uint8_t* key, const uint8_t* nonce,
+                    size_t nonce_len, const uint8_t* aad, size_t aad_len,
+                    const uint8_t* plaintext, size_t plaintext_len,
+                    uint8_t* ciphertext, uint8_t* tag, size_t tag_len);
+int AES_EAX_decrypt(const uint8_t* key, const uint8_t* nonce,
+                    size_t nonce_len, const uint8_t* aad, size_t aad_len,
+                    const uint8_t* ciphertext, size_t ciphertext_len,
+                    const uint8_t* tag, size_t tag_len, uint8_t* plaintext);
 
 #endif
 

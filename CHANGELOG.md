@@ -8,6 +8,10 @@ SPDX-License-Identifier: Unlicense
 
 ## Unreleased
 
+- Added opt-in, heap-free AES-EAX authenticated encryption with the Appendix G
+  EAX vectors and all 240 Wycheproof AES-EAX cases, including authentication
+  failure, in-place, and API validation tests. Vendored vector attribution and
+  Apache-2.0/public-domain licensing details are recorded with the corpus.
 - Added opt-in, heap-free, one-shot AES-CCM authenticated encryption with
   NIST SP 800-38C and RFC 3610 vectors, plus unified opt-in CAVP response
   validation for AES block modes, CCM, and GCM through the single `AES_CAVP`

@@ -88,6 +88,9 @@ void AES_CAVP_GHASH_HARDWARE_MULTIPLY(uint8_t* result,
 #if defined(AES_CAVP) && (AES_CAVP == 1)
 MunitResult test_cavp(const MunitParameter params[], void* data);
 #endif
+#if defined(EAX) && (EAX == 1)
+MunitResult test_eax(const MunitParameter params[], void* data);
+#endif
 
 static MunitResult test_key_schedule(const MunitParameter params[], void* data)
 {
@@ -647,6 +650,9 @@ static MunitTest test_suite_tests[] = {
 #if !defined(AES192) && !defined(AES256)
   { "/gcm-non96-iv", test_gcm_non96_iv, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #endif
+#endif
+#if defined(EAX) && (EAX == 1)
+  { "/eax", test_eax, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #endif
   { NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL }
 };

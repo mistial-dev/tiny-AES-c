@@ -4,13 +4,14 @@ SPDX-FileCopyrightText: Mistial Dev
 SPDX-License-Identifier: Unlicense
 -->
 
-![CI](https://github.com/mistial-dev/tiny-AES-C/actions/workflows/c-cpp.yml/badge.svg)
+[![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](unlicense.txt)
+[![Build Status](https://img.shields.io/badge/tests-100%25%20passing-brightgreen.svg)](https://github.com/mistial-dev/tiny-AES-c/actions)
 ### Tiny AES in C
 
 This repository is a fork of [kokke/tiny-AES-c](https://github.com/kokke/tiny-AES-c).
 Fork-specific changes are documented in [CHANGELOG.md](CHANGELOG.md).
 
-This is a small and portable implementation of the AES [ECB](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Electronic_Codebook_.28ECB.29), [CTR](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Counter_.28CTR.29), [CBC](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Block_Chaining_.28CBC.29), [OFB](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Output_feedback_.28OFB.29), and opt-in authenticated [CCM](https://en.wikipedia.org/wiki/CCM_mode) and [GCM](https://en.wikipedia.org/wiki/Galois/Counter_Mode) modes written in C.
+This is a small and portable implementation of the AES [ECB](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Electronic_Codebook_.28ECB.29), [CTR](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Counter_.28CTR.29), [CBC](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Block_Chaining_.28CBC.29), [OFB](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Output_feedback_.28OFB.29), and opt-in authenticated [CCM](https://en.wikipedia.org/wiki/CCM_mode), [EAX](https://eprint.iacr.org/2003/069), and [GCM](https://en.wikipedia.org/wiki/Galois/Counter_Mode) modes written in C.
 
 You can override the default key-size of 128 bit with 192 or 256 bit by defining the symbols AES192 or AES256 in [`aes.h`](aes.h).
 
@@ -43,6 +44,12 @@ int AES_CCM_encrypt(const uint8_t* key, const uint8_t* nonce,
                     const uint8_t* plaintext, size_t plaintext_len,
                     uint8_t* ciphertext, uint8_t* tag, size_t tag_len);
 
+/* Enable EAX=1 for one-shot authenticated encryption. */
+int AES_EAX_encrypt(const uint8_t* key, const uint8_t* nonce,
+                    size_t nonce_len, const uint8_t* aad, size_t aad_len,
+                    const uint8_t* plaintext, size_t plaintext_len,
+                    uint8_t* ciphertext, uint8_t* tag, size_t tag_len);
+
 /* Enable GCM with GCM=1 and use this streaming API. */
 int AES_GCM_init(struct AES_GCM_ctx* ctx, const uint8_t* key,
                  const uint8_t* iv, size_t iv_len);
@@ -60,7 +67,7 @@ Important notes:
  * This library is designed for small code size and simplicity, intended for cases where small binary size, low memory footprint and portability is more important than high performance. If speed is a concern, you can try more complex libraries, e.g. [Mbed TLS](https://tls.mbed.org/), [OpenSSL](https://www.openssl.org/) etc.
  * This fork uses fixed-size masked scans for the AES S-boxes instead of secret-indexed table lookups, reducing cache-timing leakage. Constant-time behavior still depends on the compiler and target platform.
 
-The default build enables only CTR. CBC, ECB, OFB, CCM, and GCM are opt-in so unused modes do not add their code or context state. Enable modes with `AES_ENABLE_CBC`, `AES_ENABLE_ECB`, `AES_ENABLE_OFB`, `AES_ENABLE_CCM`, and `AES_ENABLE_GCM` in Make, or the corresponding `TINY_AES_ENABLE_*` CMake options. Direct users can define the `CBC`, `ECB`, `OFB`, `CCM`, and `GCM` symbols to `1` before including [`aes.h`](aes.h).
+The default build enables only CTR. CBC, ECB, OFB, CCM, EAX, and GCM are opt-in so unused modes do not add their code or context state. Enable modes with `AES_ENABLE_CBC`, `AES_ENABLE_ECB`, `AES_ENABLE_OFB`, `AES_ENABLE_CCM`, `AES_ENABLE_EAX`, and `AES_ENABLE_GCM` in Make, or the corresponding `TINY_AES_ENABLE_*` CMake options. Direct users can define the `CBC`, `ECB`, `OFB`, `CCM`, `EAX`, and `GCM` symbols to `1` before including [`aes.h`](aes.h).
 
 For example, enable OFB without the other optional modes:
 
@@ -76,6 +83,13 @@ Encryption and decryption support in-place buffers. Decryption wipes the
 plaintext output on authentication failure, and callers must still treat a
 failure as rejection and must not use the output. CCM is compiled out unless
 explicitly enabled.
+
+EAX is enabled with `make AES_ENABLE_EAX=1` or
+`cmake -S . -B build -DTINY_AES_ENABLE_EAX=ON`. It is a heap-free, one-shot
+AEAD interface with arbitrary nonce and AAD lengths and tags from 0–16 bytes.
+Nonce uniqueness remains the caller's responsibility. Decryption authenticates
+before writing plaintext and leaves the output untouched on authentication
+failure. EAX is compiled out unless explicitly enabled.
 
 OFB is a synchronous stream mode: encryption and decryption use the same
 function, do not require padding, and can process data in arbitrary chunks.
@@ -198,10 +212,14 @@ see the [NIST CAVP block ciphers page](https://csrc.nist.gov/projects/cryptograp
 
 The GCM implementation is checked against compact samples from the NIST CAVP
 AES-GCM vectors in [SharedAES-GCM](https://github.com/mko-x/SharedAES-GCM/tree/master/Sources/gcm_test_vectors).
+EAX is checked against the RFC-style Appendix G vectors from the EAX paper and
+all 240 AES-EAX cases in the vendored [Wycheproof](https://github.com/C2SP/wycheproof)
+JSON corpus. Attribution and license details are in
+[`test_vectors/eax/README.md`](test_vectors/eax/README.md).
 
 ## Testing
 
-Unit tests use the vendored [µunit (munit)](https://nemequ.github.io/munit/) framework and cover each mode in isolation, all AES key sizes, S-box profiles, GHASH profiles, and focused API boundaries. One all-enabled build checks integration without multiplying every mode subset. CCM and GCM are compiled out when disabled.
+Unit tests use the vendored [µunit (munit)](https://nemequ.github.io/munit/) framework and cover each mode in isolation, all AES key sizes, S-box profiles, GHASH profiles, and focused API boundaries. One all-enabled build checks integration without multiplying every mode subset. CCM, EAX, and GCM are compiled out when disabled.
 
 Samples and focused tests run by default. Enable the complete vendored CAVP corpora with one switch:
 

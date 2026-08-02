@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: Unlicense
+
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Build & Test (${{ matrix.os }} - ${{ matrix.compiler }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            compiler: gcc
+            cc: gcc
+          - os: ubuntu-latest
+            compiler: clang
+            cc: clang
+          - os: macos-latest
+            compiler: clang
+            cc: clang
+          - os: windows-latest
+            compiler: msvc
+            cc: cl
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install GCC/Clang
+      if: runner.os == 'Linux'
+      run: |
+        if [ "${{ matrix.cc }}" = clang ]; then
+          sudo apt-get update
+          sudo apt-get install -y clang cmake
+        else
+          sudo apt-get update
+          sudo apt-get install -y gcc cmake
+        fi
+
+    - name: Select compiler
+      if: runner.os != 'Windows'
+      run: echo "CC=${{ matrix.cc }}" >> "$GITHUB_ENV"
+
+    - name: Configure CMake
+      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DTINY_AES_BUILD_TESTS=ON -DTINY_AES_CAVP=ON
+
+    - name: Build
+      run: cmake --build build --config Release --parallel 4
+
+    - name: Test
+      run: ctest --test-dir build -C Release --output-on-failure --parallel 4

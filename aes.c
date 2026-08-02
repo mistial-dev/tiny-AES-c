@@ -5,7 +5,7 @@
  *
 
 This is an implementation of the AES algorithm, specifically ECB, CTR, CBC, OFB,
-CCM, and GCM modes.
+CCM, EAX, and GCM modes.
 Block size can be chosen in aes.h - available choices are AES128, AES192, AES256.
 
 The implementation is verified against the test vectors in:
@@ -76,6 +76,7 @@ NOTE:   String length must be evenly divisible by 16byte (str_len % 16 == 0)
 #if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1) || \
     (defined(CTR) && CTR == 1) || (defined(OFB) && OFB == 1) || \
     (defined(GCM) && GCM == 1) || (defined(CCM) && CCM == 1) || \
+    (defined(EAX) && EAX == 1) || \
     (defined(AES_CAVP) && AES_CAVP == 1)
 // state - array holding the intermediate results during encryption/decryption.
 typedef uint8_t state_t[4][4];
@@ -382,6 +383,7 @@ void AES_ctx_set_iv(struct AES_ctx* ctx, const uint8_t* iv)
 #if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1) || \
     (defined(CTR) && CTR == 1) || (defined(OFB) && OFB == 1) || \
     (defined(GCM) && GCM == 1) || (defined(CCM) && CCM == 1) || \
+    (defined(EAX) && EAX == 1) || \
     (defined(AES_CAVP) && AES_CAVP == 1)
 
 // This function adds the round key to state.
@@ -1517,3 +1519,199 @@ int AES_CCM_decrypt(const uint8_t* key, const uint8_t* nonce,
 }
 
 #endif // #if defined(CCM) && (CCM == 1)
+
+#if defined(EAX) && (EAX == 1)
+
+static void eax_double(uint8_t value[AES_BLOCKLEN])
+{
+  uint8_t carry = 0;
+  unsigned i;
+
+  for (i = AES_BLOCKLEN; i > 0; --i)
+  {
+    const unsigned offset = i - 1u;
+    const uint8_t next = (uint8_t)(value[offset] >> 7);
+    value[offset] = (uint8_t)((value[offset] << 1) | carry);
+    carry = next;
+  }
+  value[AES_BLOCKLEN - 1u] ^= (uint8_t)(0x87u & (uint8_t)(0u - carry));
+}
+
+static void eax_mac_block(uint8_t mac[AES_BLOCKLEN],
+                          const uint8_t block[AES_BLOCKLEN],
+                          const uint8_t* round_key)
+{
+  unsigned i;
+
+  for (i = 0; i < AES_BLOCKLEN; ++i)
+    mac[i] ^= block[i];
+  Cipher((state_t*)mac, round_key);
+}
+
+static void eax_omac(const struct AES_ctx* aes, uint8_t domain,
+                     const uint8_t* data, size_t length,
+                     uint8_t result[AES_BLOCKLEN])
+{
+  uint8_t l[AES_BLOCKLEN] = { 0 };
+  uint8_t b[AES_BLOCKLEN];
+  uint8_t p[AES_BLOCKLEN];
+  uint8_t mac[AES_BLOCKLEN] = { 0 };
+  uint8_t block[AES_BLOCKLEN] = { 0 };
+  size_t count;
+
+  Cipher((state_t*)l, aes->RoundKey);
+  aes_copy_bytes(b, l, AES_BLOCKLEN);
+  eax_double(b);
+  aes_copy_bytes(p, b, AES_BLOCKLEN);
+  eax_double(p);
+
+  block[AES_BLOCKLEN - 1u] = domain;
+  if (length == 0)
+  {
+    for (count = 0; count < AES_BLOCKLEN; ++count)
+      block[count] ^= b[count];
+    eax_mac_block(mac, block, aes->RoundKey);
+  }
+  else
+  {
+    eax_mac_block(mac, block, aes->RoundKey);
+    while (length > AES_BLOCKLEN)
+    {
+      eax_mac_block(mac, data, aes->RoundKey);
+      data += AES_BLOCKLEN;
+      length -= AES_BLOCKLEN;
+    }
+    memset(block, 0, AES_BLOCKLEN);
+    aes_copy_bytes(block, data, length);
+    if (length == AES_BLOCKLEN)
+    {
+      for (count = 0; count < AES_BLOCKLEN; ++count)
+        block[count] ^= b[count];
+    }
+    else
+    {
+      block[length] = 0x80;
+      for (count = 0; count < AES_BLOCKLEN; ++count)
+        block[count] ^= p[count];
+    }
+    eax_mac_block(mac, block, aes->RoundKey);
+  }
+  aes_copy_bytes(result, mac, AES_BLOCKLEN);
+}
+
+static void eax_increment(uint8_t counter[AES_BLOCKLEN])
+{
+  unsigned i;
+
+  for (i = AES_BLOCKLEN; i > 0; --i)
+  {
+    if (++counter[i - 1u] != 0)
+      break;
+  }
+}
+
+static void eax_ctr_xor(const struct AES_ctx* aes,
+                        const uint8_t initial[AES_BLOCKLEN],
+                        const uint8_t* input, uint8_t* output, size_t length)
+{
+  uint8_t counter[AES_BLOCKLEN];
+  uint8_t stream[AES_BLOCKLEN];
+  size_t offset = 0;
+
+  aes_copy_bytes(counter, initial, AES_BLOCKLEN);
+  while (offset < length)
+  {
+    const size_t count = length - offset < AES_BLOCKLEN ?
+                         length - offset : AES_BLOCKLEN;
+    aes_copy_bytes(stream, counter, AES_BLOCKLEN);
+    Cipher((state_t*)stream, aes->RoundKey);
+    for (size_t i = 0; i < count; ++i)
+      output[offset + i] = (uint8_t)(input[offset + i] ^ stream[i]);
+    eax_increment(counter);
+    offset += count;
+  }
+}
+
+static void eax_wipe(void* memory, size_t length)
+{
+  volatile uint8_t* bytes = (volatile uint8_t*)memory;
+  size_t i;
+
+  for (i = 0; i < length; ++i)
+    bytes[i] = 0;
+}
+
+static int eax_crypt(const uint8_t* key, const uint8_t* nonce,
+                     size_t nonce_len, const uint8_t* aad, size_t aad_len,
+                     const uint8_t* input, size_t input_len, uint8_t* output,
+                     uint8_t* tag, size_t tag_len, int decrypt)
+{
+  struct AES_ctx aes;
+  uint8_t nonce_mac[AES_BLOCKLEN];
+  uint8_t header_mac[AES_BLOCKLEN];
+  uint8_t message_mac[AES_BLOCKLEN];
+  uint8_t full_tag[AES_BLOCKLEN];
+  uint8_t difference = 0;
+  int status = AES_EAX_ERROR;
+  size_t i;
+
+  if (key == NULL || (nonce_len != 0 && nonce == NULL) ||
+      (aad_len != 0 && aad == NULL) ||
+      (input_len != 0 && (input == NULL || output == NULL)) ||
+      (tag_len != 0 && tag == NULL) || tag_len > AES_BLOCKLEN)
+    return AES_EAX_ERROR;
+
+  AES_init_ctx(&aes, key);
+  eax_omac(&aes, 0, nonce, nonce_len, nonce_mac);
+  eax_omac(&aes, 1, aad, aad_len, header_mac);
+
+  if (decrypt)
+  {
+    eax_omac(&aes, 2, input, input_len, message_mac);
+    for (i = 0; i < AES_BLOCKLEN; ++i)
+      full_tag[i] = (uint8_t)(nonce_mac[i] ^ header_mac[i] ^ message_mac[i]);
+    for (i = 0; i < tag_len; ++i)
+      difference |= (uint8_t)(full_tag[i] ^ tag[i]);
+    if (difference == 0)
+    {
+      eax_ctr_xor(&aes, nonce_mac, input, output, input_len);
+      status = AES_EAX_SUCCESS;
+    }
+  }
+  else
+  {
+    eax_ctr_xor(&aes, nonce_mac, input, output, input_len);
+    eax_omac(&aes, 2, output, input_len, message_mac);
+    for (i = 0; i < AES_BLOCKLEN; ++i)
+      full_tag[i] = (uint8_t)(nonce_mac[i] ^ header_mac[i] ^ message_mac[i]);
+    aes_copy_bytes(tag, full_tag, tag_len);
+    status = AES_EAX_SUCCESS;
+  }
+
+  eax_wipe(&aes, sizeof(aes));
+  eax_wipe(nonce_mac, sizeof(nonce_mac));
+  eax_wipe(header_mac, sizeof(header_mac));
+  eax_wipe(message_mac, sizeof(message_mac));
+  eax_wipe(full_tag, sizeof(full_tag));
+  return status;
+}
+
+int AES_EAX_encrypt(const uint8_t* key, const uint8_t* nonce,
+                    size_t nonce_len, const uint8_t* aad, size_t aad_len,
+                    const uint8_t* plaintext, size_t plaintext_len,
+                    uint8_t* ciphertext, uint8_t* tag, size_t tag_len)
+{
+  return eax_crypt(key, nonce, nonce_len, aad, aad_len, plaintext,
+                   plaintext_len, ciphertext, tag, tag_len, 0);
+}
+
+int AES_EAX_decrypt(const uint8_t* key, const uint8_t* nonce,
+                    size_t nonce_len, const uint8_t* aad, size_t aad_len,
+                    const uint8_t* ciphertext, size_t ciphertext_len,
+                    const uint8_t* tag, size_t tag_len, uint8_t* plaintext)
+{
+  return eax_crypt(key, nonce, nonce_len, aad, aad_len, ciphertext,
+                   ciphertext_len, plaintext, (uint8_t*)tag, tag_len, 1);
+}
+
+#endif // #if defined(EAX) && (EAX == 1)
