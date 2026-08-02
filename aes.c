@@ -980,11 +980,19 @@ static void gcm_multiply_wide(uint8_t* result, const uint8_t* left,
 
 #if (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_TABLE4) || \
     (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_FAST_TABLE)
+
+#if AES_GCM_SHARED_TABLE
+static uint8_t gcm_shared_table[32][16][AES_BLOCKLEN];
+#define GCM_TABLE_REF gcm_shared_table
+#else
+#define GCM_TABLE_REF (ctx->ghash_table)
+#endif
+
 static void gcm_init_table(struct AES_GCM_ctx* ctx)
 {
   uint8_t input[AES_BLOCKLEN];
-  unsigned position;
-  unsigned entry;
+  uint8_t position;
+  uint8_t entry;
 
   for (position = 0; position < 32; ++position)
   {
@@ -992,9 +1000,8 @@ static void gcm_init_table(struct AES_GCM_ctx* ctx)
     {
       memset(input, 0, AES_BLOCKLEN);
       input[position / 2u] = (uint8_t)((position % 2u) == 0u ?
-        entry << 4 : entry);
-      gcm_multiply_bitwise(ctx->ghash_table[position][entry], input,
-                           ctx->H);
+        (uint8_t)(entry << 4) : entry);
+      gcm_multiply_bitwise(GCM_TABLE_REF[position][entry], input, ctx->H);
     }
   }
 }
@@ -1004,8 +1011,8 @@ static void gcm_select_table4(uint8_t* selected,
                               const uint8_t table[16][AES_BLOCKLEN],
                               uint8_t nibble)
 {
-  unsigned entry;
-  unsigned i;
+  uint8_t entry;
+  uint8_t i;
   memset(selected, 0, AES_BLOCKLEN);
   for (entry = 0; entry < 16; ++entry)
   {
@@ -1021,18 +1028,23 @@ static void gcm_multiply_table4(uint8_t* result, const uint8_t* left,
 {
   uint8_t value[AES_BLOCKLEN] = { 0 };
   uint8_t selected[AES_BLOCKLEN];
-  unsigned position;
+  uint8_t position;
+  uint8_t i;
+
+#if AES_GCM_SHARED_TABLE
+  (void) ctx;
+#endif
 
   for (position = 0; position < 32; ++position)
   {
     const uint8_t nibble = (uint8_t)((position % 2u) == 0u ?
       left[position / 2u] >> 4 : left[position / 2u] & 0x0fu);
 #if AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_FAST_TABLE
-    aes_copy_bytes(selected, ctx->ghash_table[position][nibble], AES_BLOCKLEN);
+    aes_copy_bytes(selected, GCM_TABLE_REF[position][nibble], AES_BLOCKLEN);
 #else
-    gcm_select_table4(selected, ctx->ghash_table[position], nibble);
+    gcm_select_table4(selected, GCM_TABLE_REF[position], nibble);
 #endif
-    for (unsigned i = 0; i < AES_BLOCKLEN; ++i)
+    for (i = 0; i < AES_BLOCKLEN; ++i)
       value[i] ^= selected[i];
   }
   aes_copy_bytes(result, value, AES_BLOCKLEN);
@@ -1617,37 +1629,41 @@ static int ccm_crypt(const uint8_t* key, const uint8_t* nonce,
                      const uint8_t* input, size_t input_len, uint8_t* output,
                      const uint8_t* tag, size_t tag_len, int decrypt)
 {
-  struct AES_ctx aes;
-  uint8_t mac[AES_BLOCKLEN] = { 0 };
-  uint8_t block[AES_BLOCKLEN] = { 0 };
-  uint8_t b0[AES_BLOCKLEN] = { 0 };
-  uint8_t counter[AES_BLOCKLEN];
-  uint8_t s0[AES_BLOCKLEN];
-  uint8_t full_tag[AES_BLOCKLEN];
+  /* Single workspace so stack use is predictable and wipe is one call. */
+  struct {
+    struct AES_ctx aes;
+    uint8_t mac[AES_BLOCKLEN];
+    uint8_t block[AES_BLOCKLEN];
+    uint8_t work[AES_BLOCKLEN]; /* B0, then full tag */
+    uint8_t counter[AES_BLOCKLEN];
+    uint8_t s0[AES_BLOCKLEN];
+    uint8_t plain[AES_BLOCKLEN];
+  } st;
   size_t used = 0;
   size_t offset = 0;
   unsigned q;
-  unsigned i;
+  uint8_t i;
+  int status = AES_OK;
 
-  if (key == NULL || nonce == NULL ||
+  if (key == NULL || nonce == NULL || tag == NULL ||
       (aad_len != 0 && aad == NULL) ||
       (input_len != 0 && (input == NULL || output == NULL)) ||
-      (decrypt && tag == NULL) || (!decrypt && tag == NULL) ||
       nonce_len < AES_CCM_MIN_NONCE_LEN || nonce_len > AES_CCM_MAX_NONCE_LEN ||
       !ccm_tag_length_is_valid(tag_len) ||
       !ccm_payload_length_is_valid(nonce_len, input_len) ||
       (uint64_t)aad_len > UINT64_MAX)
     return AES_ERR;
 
+  memset(&st, 0, sizeof(st));
   q = ccm_length_field_size(nonce_len);
-  b0[0] = (uint8_t)((aad_len != 0 ? 0x40u : 0u) |
-                    (uint8_t)(((tag_len - 2u) / 2u) << 3) |
-                    (uint8_t)(q - 1u));
-  aes_copy_bytes(b0 + 1, nonce, nonce_len);
-  ccm_store_length(b0 + 1 + nonce_len, (uint64_t)input_len, q);
+  st.work[0] = (uint8_t)((aad_len != 0 ? 0x40u : 0u) |
+                         (uint8_t)(((tag_len - 2u) / 2u) << 3) |
+                         (uint8_t)(q - 1u));
+  aes_copy_bytes(st.work + 1, nonce, nonce_len);
+  ccm_store_length(st.work + 1 + nonce_len, (uint64_t)input_len, q);
 
-  AES_init_ctx(&aes, key);
-  ccm_mac_block(mac, b0, aes.RoundKey);
+  AES_init_ctx(&st.aes, key);
+  ccm_mac_block(st.mac, st.work, st.aes.RoundKey);
 
   if (aad_len != 0)
   {
@@ -1673,80 +1689,63 @@ static int ccm_crypt(const uint8_t* key, const uint8_t* nonce,
       aad_header[1] = 0xff;
       ccm_store_length(aad_header + 2, (uint64_t)aad_len, 8);
     }
-    ccm_mac_absorb(mac, block, &used, aad_header, header_len, aes.RoundKey);
-    ccm_mac_absorb(mac, block, &used, aad, aad_len, aes.RoundKey);
-    ccm_mac_pad(mac, block, &used, aes.RoundKey);
+    ccm_mac_absorb(st.mac, st.block, &used, aad_header, header_len,
+                   st.aes.RoundKey);
+    ccm_mac_absorb(st.mac, st.block, &used, aad, aad_len, st.aes.RoundKey);
+    ccm_mac_pad(st.mac, st.block, &used, st.aes.RoundKey);
   }
 
-  ccm_make_counter(counter, nonce, nonce_len, 0);
-  aes_copy_bytes(s0, counter, AES_BLOCKLEN);
-  Cipher((state_t*)s0, aes.RoundKey);
-  ccm_increment_counter(counter, q);
+  ccm_make_counter(st.counter, nonce, nonce_len, 0);
+  aes_copy_bytes(st.s0, st.counter, AES_BLOCKLEN);
+  Cipher((state_t*)st.s0, st.aes.RoundKey);
+  ccm_increment_counter(st.counter, q);
 
   while (offset < input_len)
   {
     const size_t length = (input_len - offset < AES_BLOCKLEN) ?
                           input_len - offset : AES_BLOCKLEN;
-    uint8_t plain[AES_BLOCKLEN] = { 0 };
 
+    memset(st.plain, 0, AES_BLOCKLEN);
+    aes_copy_bytes(st.plain, input + offset, length);
     if (decrypt)
-      aes_copy_bytes(plain, input + offset, length);
-    else
-      aes_copy_bytes(plain, input + offset, length);
-    if (decrypt)
-      ccm_xor_block(plain, length, counter, aes.RoundKey);
-    ccm_mac_absorb(mac, block, &used, plain, length, aes.RoundKey);
+      ccm_xor_block(st.plain, length, st.counter, st.aes.RoundKey);
+    ccm_mac_absorb(st.mac, st.block, &used, st.plain, length, st.aes.RoundKey);
     if (!decrypt)
     {
-      aes_copy_bytes(output + offset, plain, length);
-      ccm_xor_block(output + offset, length, counter, aes.RoundKey);
+      aes_copy_bytes(output + offset, st.plain, length);
+      ccm_xor_block(output + offset, length, st.counter, st.aes.RoundKey);
     }
     else
     {
-      aes_copy_bytes(output + offset, plain, length);
+      aes_copy_bytes(output + offset, st.plain, length);
     }
-    ccm_increment_counter(counter, q);
+    ccm_increment_counter(st.counter, q);
     offset += length;
   }
-  ccm_mac_pad(mac, block, &used, aes.RoundKey);
+  ccm_mac_pad(st.mac, st.block, &used, st.aes.RoundKey);
 
   for (i = 0; i < AES_BLOCKLEN; ++i)
-    full_tag[i] = (uint8_t)(mac[i] ^ s0[i]);
+    st.work[i] = (uint8_t)(st.mac[i] ^ st.s0[i]);
   if (decrypt)
   {
     uint8_t difference = 0;
-    for (i = 0; i < tag_len; ++i)
-      difference |= (uint8_t)(full_tag[i] ^ tag[i]);
+    for (i = 0; i < (uint8_t)tag_len; ++i)
+      difference |= (uint8_t)(st.work[i] ^ tag[i]);
     if (difference != 0)
     {
       if (output != NULL)
         memset(output, 0, input_len);
-#if AES_ZEROIZE
-      AES_ctx_clear(&aes);
-      AES_secure_zero(mac, sizeof(mac));
-      AES_secure_zero(block, sizeof(block));
-      AES_secure_zero(b0, sizeof(b0));
-      AES_secure_zero(counter, sizeof(counter));
-      AES_secure_zero(s0, sizeof(s0));
-      AES_secure_zero(full_tag, sizeof(full_tag));
-#endif
-      return AES_ERR;
+      status = AES_ERR;
     }
   }
   else
   {
-    aes_copy_bytes((uint8_t*)tag, full_tag, tag_len);
+    aes_copy_bytes((uint8_t*)tag, st.work, tag_len);
   }
 #if AES_ZEROIZE
-  AES_ctx_clear(&aes);
-  AES_secure_zero(mac, sizeof(mac));
-  AES_secure_zero(block, sizeof(block));
-  AES_secure_zero(b0, sizeof(b0));
-  AES_secure_zero(counter, sizeof(counter));
-  AES_secure_zero(s0, sizeof(s0));
-  AES_secure_zero(full_tag, sizeof(full_tag));
+  AES_secure_zero(&st, sizeof(st));
 #endif
-  return AES_OK;
+  return status;
 }
 
 int AES_CCM_encrypt(const uint8_t* key, const uint8_t* nonce,
@@ -1958,16 +1957,18 @@ static int eax_crypt(const uint8_t* key, const uint8_t* nonce,
                      const uint8_t* input, size_t input_len, uint8_t* output,
                      uint8_t* tag, size_t tag_len, int decrypt)
 {
-  struct AES_ctx aes;
-  uint8_t nonce_mac[AES_BLOCKLEN];
-  uint8_t header_mac[AES_BLOCKLEN];
-  uint8_t message_mac[AES_BLOCKLEN];
-  uint8_t full_tag[AES_BLOCKLEN];
-  uint8_t d[AES_BLOCKLEN];
-  uint8_t q[AES_BLOCKLEN];
+  struct {
+    struct AES_ctx aes;
+    uint8_t nonce_mac[AES_BLOCKLEN];
+    uint8_t header_mac[AES_BLOCKLEN];
+    uint8_t message_mac[AES_BLOCKLEN];
+    uint8_t full_tag[AES_BLOCKLEN];
+    uint8_t d[AES_BLOCKLEN];
+    uint8_t q[AES_BLOCKLEN];
+  } st;
   uint8_t difference = 0;
   int status = AES_ERR;
-  size_t i;
+  uint8_t i;
 
   if (key == NULL || (nonce_len != 0 && nonce == NULL) ||
       (aad_len != 0 && aad == NULL) ||
@@ -1975,42 +1976,38 @@ static int eax_crypt(const uint8_t* key, const uint8_t* nonce,
       tag == NULL || tag_len < AES_EAX_MIN_TAG_LEN || tag_len > AES_BLOCKLEN)
     return AES_ERR;
 
-  AES_init_ctx(&aes, key);
-  eax_key_constants(&aes, d, q);
-  eax_omac(&aes, d, q, 0, nonce, nonce_len, nonce_mac);
-  eax_omac(&aes, d, q, 1, aad, aad_len, header_mac);
+  AES_init_ctx(&st.aes, key);
+  eax_key_constants(&st.aes, st.d, st.q);
+  eax_omac(&st.aes, st.d, st.q, 0, nonce, nonce_len, st.nonce_mac);
+  eax_omac(&st.aes, st.d, st.q, 1, aad, aad_len, st.header_mac);
 
   if (decrypt)
   {
-    eax_omac(&aes, d, q, 2, input, input_len, message_mac);
+    eax_omac(&st.aes, st.d, st.q, 2, input, input_len, st.message_mac);
     for (i = 0; i < AES_BLOCKLEN; ++i)
-      full_tag[i] = (uint8_t)(nonce_mac[i] ^ header_mac[i] ^ message_mac[i]);
-    for (i = 0; i < tag_len; ++i)
-      difference |= (uint8_t)(full_tag[i] ^ tag[i]);
+      st.full_tag[i] = (uint8_t)(st.nonce_mac[i] ^ st.header_mac[i] ^
+                                 st.message_mac[i]);
+    for (i = 0; i < (uint8_t)tag_len; ++i)
+      difference |= (uint8_t)(st.full_tag[i] ^ tag[i]);
     if (difference == 0)
     {
-      eax_ctr_xor(&aes, nonce_mac, input, output, input_len, 0);
+      eax_ctr_xor(&st.aes, st.nonce_mac, input, output, input_len, 0);
       status = AES_OK;
     }
   }
   else
   {
-    eax_ctr_xor(&aes, nonce_mac, input, output, input_len, 0);
-    eax_omac(&aes, d, q, 2, output, input_len, message_mac);
+    eax_ctr_xor(&st.aes, st.nonce_mac, input, output, input_len, 0);
+    eax_omac(&st.aes, st.d, st.q, 2, output, input_len, st.message_mac);
     for (i = 0; i < AES_BLOCKLEN; ++i)
-      full_tag[i] = (uint8_t)(nonce_mac[i] ^ header_mac[i] ^ message_mac[i]);
-    aes_copy_bytes(tag, full_tag, tag_len);
+      st.full_tag[i] = (uint8_t)(st.nonce_mac[i] ^ st.header_mac[i] ^
+                                 st.message_mac[i]);
+    aes_copy_bytes(tag, st.full_tag, tag_len);
     status = AES_OK;
   }
 
 #if AES_ZEROIZE
-  AES_ctx_clear(&aes);
-  AES_secure_zero(nonce_mac, sizeof(nonce_mac));
-  AES_secure_zero(header_mac, sizeof(header_mac));
-  AES_secure_zero(message_mac, sizeof(message_mac));
-  AES_secure_zero(full_tag, sizeof(full_tag));
-  AES_secure_zero(d, sizeof(d));
-  AES_secure_zero(q, sizeof(q));
+  AES_secure_zero(&st, sizeof(st));
 #endif
   return status;
 }
@@ -2042,55 +2039,53 @@ static int eax_prime_crypt(const uint8_t* key, const uint8_t* cleartext,
                            size_t input_len, uint8_t* output,
                            const uint8_t* tag, int decrypt)
 {
-  struct AES_ctx aes;
-  uint8_t d[AES_BLOCKLEN];
-  uint8_t q[AES_BLOCKLEN];
-  uint8_t nonce_mac[AES_BLOCKLEN];
-  uint8_t message_mac[AES_BLOCKLEN];
-  uint8_t full_tag[AES_BLOCKLEN];
+  struct {
+    struct AES_ctx aes;
+    uint8_t d[AES_BLOCKLEN];
+    uint8_t q[AES_BLOCKLEN];
+    uint8_t nonce_mac[AES_BLOCKLEN];
+    uint8_t message_mac[AES_BLOCKLEN];
+    uint8_t full_tag[AES_BLOCKLEN];
+  } st;
   uint8_t difference = 0;
-  size_t i;
+  uint8_t i;
   int status = AES_ERR;
 
   if (key == NULL || (cleartext_len != 0 && cleartext == NULL) ||
       (input_len != 0 && (input == NULL || output == NULL)) || tag == NULL)
     return AES_ERR;
 
-  AES_init_ctx(&aes, key);
-  eax_prime_key_constants(&aes, d, q);
-  eax_cmac(&aes, d, -1, cleartext, cleartext_len, d, q, nonce_mac);
+  AES_init_ctx(&st.aes, key);
+  eax_prime_key_constants(&st.aes, st.d, st.q);
+  eax_cmac(&st.aes, st.d, -1, cleartext, cleartext_len, st.d, st.q,
+           st.nonce_mac);
 
   if (decrypt)
   {
-    eax_cmac(&aes, q, -1, input, input_len, d, q, message_mac);
+    eax_cmac(&st.aes, st.q, -1, input, input_len, st.d, st.q, st.message_mac);
     for (i = 0; i < AES_BLOCKLEN; ++i)
-      full_tag[i] = (uint8_t)(nonce_mac[i] ^ message_mac[i]);
+      st.full_tag[i] = (uint8_t)(st.nonce_mac[i] ^ st.message_mac[i]);
     for (i = 0; i < AES_EAX_PRIME_TAG_LEN; ++i)
-      difference |= (uint8_t)(full_tag[AES_BLOCKLEN - 1u - i] ^ tag[i]);
+      difference |= (uint8_t)(st.full_tag[AES_BLOCKLEN - 1u - i] ^ tag[i]);
     if (difference == 0)
     {
-      eax_ctr_xor(&aes, nonce_mac, input, output, input_len, 1);
+      eax_ctr_xor(&st.aes, st.nonce_mac, input, output, input_len, 1);
       status = AES_OK;
     }
   }
   else
   {
-    eax_ctr_xor(&aes, nonce_mac, input, output, input_len, 1);
-    eax_cmac(&aes, q, -1, output, input_len, d, q, message_mac);
+    eax_ctr_xor(&st.aes, st.nonce_mac, input, output, input_len, 1);
+    eax_cmac(&st.aes, st.q, -1, output, input_len, st.d, st.q, st.message_mac);
     for (i = 0; i < AES_BLOCKLEN; ++i)
-      full_tag[i] = (uint8_t)(nonce_mac[i] ^ message_mac[i]);
+      st.full_tag[i] = (uint8_t)(st.nonce_mac[i] ^ st.message_mac[i]);
     for (i = 0; i < AES_EAX_PRIME_TAG_LEN; ++i)
-      ((uint8_t*)tag)[i] = full_tag[AES_BLOCKLEN - 1u - i];
+      ((uint8_t*)tag)[i] = st.full_tag[AES_BLOCKLEN - 1u - i];
     status = AES_OK;
   }
 
 #if AES_ZEROIZE
-  AES_ctx_clear(&aes);
-  AES_secure_zero(d, sizeof(d));
-  AES_secure_zero(q, sizeof(q));
-  AES_secure_zero(nonce_mac, sizeof(nonce_mac));
-  AES_secure_zero(message_mac, sizeof(message_mac));
-  AES_secure_zero(full_tag, sizeof(full_tag));
+  AES_secure_zero(&st, sizeof(st));
 #endif
   return status;
 }

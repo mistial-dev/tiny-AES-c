@@ -87,6 +87,27 @@
   #error "AES_GCM_ALLOW_TAG4 must be 0 or 1"
 #endif
 
+/*
+ * AES_TINY=1 rejects GHASH table profiles (~8.5 KiB per context by default).
+ * AES_GCM_SHARED_TABLE=1 stores one file-scope 8 KiB table for all contexts
+ * (serialize AES_GCM_init if used concurrently).
+ */
+#ifndef AES_TINY
+  #define AES_TINY 0
+#endif
+
+#if (AES_TINY != 0) && (AES_TINY != 1)
+  #error "AES_TINY must be 0 or 1"
+#endif
+
+#ifndef AES_GCM_SHARED_TABLE
+  #define AES_GCM_SHARED_TABLE 0
+#endif
+
+#if (AES_GCM_SHARED_TABLE != 0) && (AES_GCM_SHARED_TABLE != 1)
+  #error "AES_GCM_SHARED_TABLE must be 0 or 1"
+#endif
+
 /* GCM GHASH implementation profiles. */
 #define AES_GCM_GHASH_MODE_AUTO       0
 #define AES_GCM_GHASH_MODE_BITWISE    1
@@ -102,6 +123,12 @@
 #if (AES_GCM_GHASH_MODE < AES_GCM_GHASH_MODE_AUTO) || \
     (AES_GCM_GHASH_MODE > AES_GCM_GHASH_MODE_HARDWARE)
   #error "AES_GCM_GHASH_MODE is invalid"
+#endif
+
+#if (AES_TINY == 1) && \
+    ((AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_TABLE4) || \
+     (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_FAST_TABLE))
+  #error "AES_TINY forbids table4/fast-table GHASH (large AES_GCM_ctx)"
 #endif
 
 #if defined(AES_GCM_GHASH_HARDWARE_MULTIPLY)
@@ -234,8 +261,10 @@ struct AES_GCM_ctx
   uint8_t stream[AES_BLOCKLEN];
   uint8_t S[AES_BLOCKLEN];
   uint8_t ghash[AES_BLOCKLEN];
-#if (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_TABLE4) || \
-    (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_FAST_TABLE)
+#if ((AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_TABLE4) || \
+     (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_FAST_TABLE)) && \
+    (AES_GCM_SHARED_TABLE == 0)
+  /* ~8 KiB. Use AES_GCM_SHARED_TABLE=1 or avoid table modes on tiny MCUs. */
   uint8_t ghash_table[32][16][AES_BLOCKLEN];
 #endif
 
