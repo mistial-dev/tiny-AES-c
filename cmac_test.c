@@ -21,7 +21,7 @@
 #define CMAC_CAVP_DIR "test_vectors/cmac"
 #endif
 
-#if defined(CMAC) && (CMAC == 1)
+#if defined(AES_ENABLE_CMAC) && (AES_ENABLE_CMAC == 1)
 
 #if AES_SBOX_MODE == AES_SBOX_MODE_RUNTIME
 static void cmac_initialize_sbox(void)

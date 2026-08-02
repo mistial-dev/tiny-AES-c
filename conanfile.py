@@ -20,23 +20,23 @@ class TinyAesCConan(ConanFile):
     exports = ["unlicense.txt"]
 
     _options_dict = {
-        # enable AES128
         "AES128": [True, False],
-
-        # enable AES192
         "AES192": [True, False],
-
-        # enable AES256
         "AES256": [True, False],
-
-        # enable AES encryption in CBC-mode of operation
-        "CBC": [True, False],
-
-        # enable the basic ECB 16-byte block algorithm
-        "ECB": [True, False],
-
-        # enable encryption in counter-mode
-        "CTR": [True, False],
+        "AES_ENABLE_CBC": [True, False],
+        "AES_ENABLE_ECB": [True, False],
+        "AES_ENABLE_CTR": [True, False],
+        "AES_ENABLE_OFB": [True, False],
+        "AES_ENABLE_GCM": [True, False],
+        "AES_ENABLE_CCM": [True, False],
+        "AES_ENABLE_EAX": [True, False],
+        "AES_ENABLE_EAX_PRIME": [True, False],
+        "AES_ENABLE_SIV": [True, False],
+        "AES_ENABLE_CMAC": [True, False],
+        "AES_ZEROIZE": [True, False],
+        "AES_STRICT": [True, False],
+        "AES_TINY": [True, False],
+        "AES_WIDE_OPS": [True, False],
     }
 
     options = _options_dict
@@ -45,24 +45,41 @@ class TinyAesCConan(ConanFile):
         "AES128": True,
         "AES192": False,
         "AES256": False,
-        "CBC": True,
-        "ECB": True,
-        "CTR": True
+        "AES_ENABLE_CBC": False,
+        "AES_ENABLE_ECB": False,
+        "AES_ENABLE_CTR": True,
+        "AES_ENABLE_OFB": False,
+        "AES_ENABLE_GCM": False,
+        "AES_ENABLE_CCM": False,
+        "AES_ENABLE_EAX": False,
+        "AES_ENABLE_EAX_PRIME": False,
+        "AES_ENABLE_SIV": False,
+        "AES_ENABLE_CMAC": False,
+        "AES_ZEROIZE": True,
+        "AES_STRICT": False,
+        "AES_TINY": False,
+        "AES_WIDE_OPS": False,
     }
 
     def configure(self):
-        if not self.options.CBC and not self.options.ECB and not self.options.CTR:
-            raise ConanException("Need to at least specify one of CBC, ECB or CTR modes")
+        modes = [self.options.AES_ENABLE_CBC, self.options.AES_ENABLE_ECB, self.options.AES_ENABLE_CTR,
+                 self.options.AES_ENABLE_OFB, self.options.AES_ENABLE_GCM, self.options.AES_ENABLE_CCM,
+                 self.options.AES_ENABLE_EAX, self.options.AES_ENABLE_EAX_PRIME, self.options.AES_ENABLE_SIV,
+                 self.options.AES_ENABLE_CMAC]
+        if not any(modes):
+            raise ConanException("Need to at least specify one operation mode")
 
         if not self.options.AES128 and not self.options.AES192 and not self.options.AES256:
             raise ConanException("Need to at least specify one of AES{128, 192, 256} modes")
 
     def build(self):
         cmake = CMake(self)
-
         for key in self._options_dict.keys():
-            if self.options[key]:
-                cmake.definitions["CMAKE_CFLAGS"].append(key)
+            val = self.options[key]
+            if key.startswith("AES_ENABLE_"):
+                cmake.definitions[f"TINY_{key}"] = "ON" if val else "OFF"
+            elif key in ["AES_ZEROIZE", "AES_STRICT", "AES_TINY", "AES_WIDE_OPS"]:
+                cmake.definitions[f"TINY_{key}"] = "ON" if val else "OFF"
 
         cmake.configure()
         cmake.build()

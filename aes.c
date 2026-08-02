@@ -79,13 +79,13 @@ NOTE:   String length must be evenly divisible by 16byte (str_len % 16 == 0)
 /*****************************************************************************/
 /* Private variables:                                                        */
 /*****************************************************************************/
-#if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1) || \
-    (defined(CTR) && CTR == 1) || (defined(OFB) && OFB == 1) || \
-    (defined(GCM) && GCM == 1) || (defined(CCM) && CCM == 1) || \
-    (defined(EAX) && EAX == 1) || \
-    (defined(EAX_PRIME) && EAX_PRIME == 1) || \
-    (defined(SIV) && SIV == 1) || \
-    (defined(CMAC) && CMAC == 1) || \
+#if (defined(AES_ENABLE_CBC) && AES_ENABLE_CBC == 1) || (defined(AES_ENABLE_ECB) && AES_ENABLE_ECB == 1) || \
+    (defined(AES_ENABLE_CTR) && AES_ENABLE_CTR == 1) || (defined(AES_ENABLE_OFB) && AES_ENABLE_OFB == 1) || \
+    (defined(AES_ENABLE_GCM) && AES_ENABLE_GCM == 1) || (defined(AES_ENABLE_CCM) && AES_ENABLE_CCM == 1) || \
+    (defined(AES_ENABLE_EAX) && AES_ENABLE_EAX == 1) || \
+    (defined(AES_ENABLE_EAX_PRIME) && AES_ENABLE_EAX_PRIME == 1) || \
+    (defined(AES_ENABLE_SIV) && AES_ENABLE_SIV == 1) || \
+    (defined(AES_ENABLE_CMAC) && AES_ENABLE_CMAC == 1) || \
     (defined(AES_CAVP) && AES_CAVP == 1)
 /* state - intermediate AES state during encryption/decryption. */
 typedef uint8_t state_t[4][4];
@@ -118,7 +118,7 @@ static const uint8_t sbox[256] = {
   0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16 };
 #endif
 
-#if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1) || \
+#if (defined(AES_ENABLE_CBC) && AES_ENABLE_CBC == 1) || (defined(AES_ENABLE_ECB) && AES_ENABLE_ECB == 1) || \
     (defined(AES_CAVP) && AES_CAVP == 1)
 #if AES_SBOX_MODE == AES_SBOX_MODE_RUNTIME
 static uint8_t rsbox[256];
@@ -202,7 +202,7 @@ void AES_init_sbox(void)
                         sbox_rotate_left(inverse, 4) ^ 0x63);
   }
 
-#if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1) || \
+#if (defined(AES_ENABLE_CBC) && AES_ENABLE_CBC == 1) || (defined(AES_ENABLE_ECB) && AES_ENABLE_ECB == 1) || \
     (defined(AES_CAVP) && AES_CAVP == 1)
   for (i = 0; i < 256; ++i)
     rsbox[sbox[i]] = (uint8_t)i;
@@ -248,6 +248,9 @@ void AES_secure_zero(void* memory, size_t length)
 
   for (i = 0; i < length; ++i)
     bytes[i] = 0;
+#if defined(__GNUC__) || defined(__clang__)
+  __asm__ __volatile__("" ::: "memory");
+#endif
 }
 
 void AES_ctx_clear(struct AES_ctx* ctx)
@@ -257,9 +260,9 @@ void AES_ctx_clear(struct AES_ctx* ctx)
   AES_secure_zero(ctx, sizeof(*ctx));
 }
 
-#if (defined(GCM) && (GCM == 1)) || (defined(CCM) && (CCM == 1)) || \
-    (defined(EAX) && (EAX == 1)) || (defined(EAX_PRIME) && (EAX_PRIME == 1)) || \
-    (defined(SIV) && (SIV == 1))
+#if (defined(AES_ENABLE_GCM) && (AES_ENABLE_GCM == 1)) || (defined(AES_ENABLE_CCM) && (AES_ENABLE_CCM == 1)) || \
+    (defined(AES_ENABLE_EAX) && (AES_ENABLE_EAX == 1)) || (defined(AES_ENABLE_EAX_PRIME) && (AES_ENABLE_EAX_PRIME == 1)) || \
+    (defined(AES_ENABLE_SIV) && (AES_ENABLE_SIV == 1))
 /*
  * Completely disjoint buffers (exact alias is not disjoint).
  * Empty lengths are always treated as disjoint.
@@ -304,7 +307,7 @@ static uint8_t xtime(uint8_t x)
   return ((x<<1) ^ (((x>>7) & 1) * 0x1b));
 }
 
-#if defined(CBC) && (CBC == 1)
+#if defined(AES_ENABLE_CBC) && (AES_ENABLE_CBC == 1)
 static void aes_xor_block(uint8_t* dst, const uint8_t* src)
 {
 #if AES_WIDE_OPS_ENABLED
@@ -424,36 +427,36 @@ static void KeyExpansion(uint8_t* RoundKey, const uint8_t* Key)
 void AES_init_ctx(struct AES_ctx* ctx, const uint8_t* key)
 {
   KeyExpansion(ctx->RoundKey, key);
-#if defined(OFB) && (OFB == 1)
+#if defined(AES_ENABLE_OFB) && (AES_ENABLE_OFB == 1)
   ctx->ofb_pos = AES_BLOCKLEN;
 #endif
 }
-#if (defined(CBC) && (CBC == 1)) || (defined(CTR) && (CTR == 1)) || \
-    (defined(OFB) && (OFB == 1))
+#if (defined(AES_ENABLE_CBC) && (AES_ENABLE_CBC == 1)) || (defined(AES_ENABLE_CTR) && (AES_ENABLE_CTR == 1)) || \
+    (defined(AES_ENABLE_OFB) && (AES_ENABLE_OFB == 1))
 void AES_init_ctx_iv(struct AES_ctx* ctx, const uint8_t* key, const uint8_t* iv)
 {
   KeyExpansion(ctx->RoundKey, key);
   aes_copy_bytes(ctx->Iv, iv, AES_BLOCKLEN);
-#if defined(OFB) && (OFB == 1)
+#if defined(AES_ENABLE_OFB) && (AES_ENABLE_OFB == 1)
   ctx->ofb_pos = AES_BLOCKLEN;
 #endif
 }
 void AES_ctx_set_iv(struct AES_ctx* ctx, const uint8_t* iv)
 {
   aes_copy_bytes(ctx->Iv, iv, AES_BLOCKLEN);
-#if defined(OFB) && (OFB == 1)
+#if defined(AES_ENABLE_OFB) && (AES_ENABLE_OFB == 1)
   ctx->ofb_pos = AES_BLOCKLEN;
 #endif
 }
 #endif
 
-#if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1) || \
-    (defined(CTR) && CTR == 1) || (defined(OFB) && OFB == 1) || \
-    (defined(GCM) && GCM == 1) || (defined(CCM) && CCM == 1) || \
-    (defined(EAX) && EAX == 1) || \
-    (defined(EAX_PRIME) && EAX_PRIME == 1) || \
-    (defined(SIV) && SIV == 1) || \
-    (defined(CMAC) && CMAC == 1) || \
+#if (defined(AES_ENABLE_CBC) && AES_ENABLE_CBC == 1) || (defined(AES_ENABLE_ECB) && AES_ENABLE_ECB == 1) || \
+    (defined(AES_ENABLE_CTR) && AES_ENABLE_CTR == 1) || (defined(AES_ENABLE_OFB) && AES_ENABLE_OFB == 1) || \
+    (defined(AES_ENABLE_GCM) && AES_ENABLE_GCM == 1) || (defined(AES_ENABLE_CCM) && AES_ENABLE_CCM == 1) || \
+    (defined(AES_ENABLE_EAX) && AES_ENABLE_EAX == 1) || \
+    (defined(AES_ENABLE_EAX_PRIME) && AES_ENABLE_EAX_PRIME == 1) || \
+    (defined(AES_ENABLE_SIV) && AES_ENABLE_SIV == 1) || \
+    (defined(AES_ENABLE_CMAC) && AES_ENABLE_CMAC == 1) || \
     (defined(AES_CAVP) && AES_CAVP == 1)
 
 /* This function adds the round key to state. */
@@ -554,7 +557,7 @@ static uint8_t Multiply(uint8_t x, uint8_t y)
 
 #endif
 
-#if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1) || \
+#if (defined(AES_ENABLE_CBC) && AES_ENABLE_CBC == 1) || (defined(AES_ENABLE_ECB) && AES_ENABLE_ECB == 1) || \
     (defined(AES_CAVP) && AES_CAVP == 1)
 static uint8_t getSBoxInvert(uint8_t num)
 {
@@ -638,7 +641,7 @@ static void InvShiftRows(state_t* state)
   (*state)[2][3] = (*state)[3][3];
   (*state)[3][3] = temp;
 }
-#endif // #if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1)
+#endif // #if (defined(AES_ENABLE_CBC) && AES_ENABLE_CBC == 1) || (defined(AES_ENABLE_ECB) && AES_ENABLE_ECB == 1)
 
 // Cipher is the main function that encrypts the PlainText.
 static void Cipher(state_t* state, const uint8_t* RoundKey)
@@ -682,7 +685,7 @@ void AES_CAVP_encrypt_block(const uint8_t* key, uint8_t block[AES_BLOCKLEN])
 
 #endif
 
-#if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1) || \
+#if (defined(AES_ENABLE_CBC) && AES_ENABLE_CBC == 1) || (defined(AES_ENABLE_ECB) && AES_ENABLE_ECB == 1) || \
     (defined(AES_CAVP) && AES_CAVP == 1)
 static void InvCipher(state_t* state, const uint8_t* RoundKey)
 {
@@ -707,7 +710,7 @@ static void InvCipher(state_t* state, const uint8_t* RoundKey)
   }
 
 }
-#endif // #if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1)
+#endif // #if (defined(AES_ENABLE_CBC) && AES_ENABLE_CBC == 1) || (defined(AES_ENABLE_ECB) && AES_ENABLE_ECB == 1)
 
 #if defined(AES_CAVP) && (AES_CAVP == 1)
 void AES_CAVP_decrypt_block(const uint8_t* key, uint8_t block[AES_BLOCKLEN])
@@ -725,7 +728,7 @@ void AES_CAVP_decrypt_block(const uint8_t* key, uint8_t block[AES_BLOCKLEN])
 /*****************************************************************************/
 /* Public functions:                                                         */
 /*****************************************************************************/
-#if defined(ECB) && (ECB == 1)
+#if defined(AES_ENABLE_ECB) && (AES_ENABLE_ECB == 1)
 
 
 void AES_ECB_encrypt(const struct AES_ctx* ctx, uint8_t* buf)
@@ -741,13 +744,13 @@ void AES_ECB_decrypt(const struct AES_ctx* ctx, uint8_t* buf)
 }
 
 
-#endif // #if defined(ECB) && (ECB == 1)
+#endif // #if defined(AES_ENABLE_ECB) && (AES_ENABLE_ECB == 1)
 
 
 
 
 
-#if defined(CBC) && (CBC == 1)
+#if defined(AES_ENABLE_CBC) && (AES_ENABLE_CBC == 1)
 
 int AES_CBC_encrypt(struct AES_ctx *ctx, uint8_t* buf, size_t length)
 {
@@ -801,7 +804,7 @@ int AES_CBC_decrypt(struct AES_ctx* ctx, uint8_t* buf, size_t length)
 
 
 
-#if defined(CTR) && (CTR == 1)
+#if defined(AES_ENABLE_CTR) && (AES_ENABLE_CTR == 1)
 
 /*
  * Blocks of keystream remaining before the 128-bit counter wraps to zero.
@@ -904,7 +907,7 @@ int AES_CTR_crypt(struct AES_ctx* ctx, uint8_t* buf, size_t length)
 #endif /* CTR */
 
 
-#if defined(OFB) && (OFB == 1)
+#if defined(AES_ENABLE_OFB) && (AES_ENABLE_OFB == 1)
 
 int AES_OFB_crypt(struct AES_ctx* ctx, uint8_t* buf, size_t length)
 {
@@ -932,7 +935,7 @@ int AES_OFB_crypt(struct AES_ctx* ctx, uint8_t* buf, size_t length)
 #endif /* OFB */
 
 
-#if defined(GCM) && (GCM == 1)
+#if defined(AES_ENABLE_GCM) && (AES_ENABLE_GCM == 1)
 
 #define AES_GCM_PHASE_AAD   0u
 #define AES_GCM_PHASE_TEXT  1u
@@ -1616,9 +1619,9 @@ done:
   return status;
 }
 
-#endif // #if defined(GCM) && (GCM == 1)
+#endif // #if defined(AES_ENABLE_GCM) && (AES_ENABLE_GCM == 1)
 
-#if defined(CCM) && (CCM == 1)
+#if defined(AES_ENABLE_CCM) && (AES_ENABLE_CCM == 1)
 
 #define AES_CCM_MIN_NONCE_LEN 7u
 #define AES_CCM_MAX_NONCE_LEN 13u
@@ -1872,12 +1875,12 @@ int AES_CCM_decrypt(const uint8_t* key, const uint8_t* nonce,
                    ciphertext_len, plaintext, tag, tag_len, 1);
 }
 
-#endif // #if defined(CCM) && (CCM == 1)
+#endif // #if defined(AES_ENABLE_CCM) && (AES_ENABLE_CCM == 1)
 
-#if (defined(EAX) && (EAX == 1)) || \
-    (defined(EAX_PRIME) && (EAX_PRIME == 1))
+#if (defined(AES_ENABLE_EAX) && (AES_ENABLE_EAX == 1)) || \
+    (defined(AES_ENABLE_EAX_PRIME) && (AES_ENABLE_EAX_PRIME == 1))
 
-#if defined(EAX) && (EAX == 1)
+#if defined(AES_ENABLE_EAX) && (AES_ENABLE_EAX == 1)
 static void eax_double(uint8_t value[AES_BLOCKLEN])
 {
   uint8_t carry = 0;
@@ -1894,7 +1897,7 @@ static void eax_double(uint8_t value[AES_BLOCKLEN])
 }
 #endif
 
-#if defined(EAX_PRIME) && (EAX_PRIME == 1)
+#if defined(AES_ENABLE_EAX_PRIME) && (AES_ENABLE_EAX_PRIME == 1)
 /* C12.22 defines EAX' field values in the reference implementation's
  * little-endian byte order, so its doubling shifts toward higher indexes and
  * applies the reduction constant to byte zero. */
@@ -1924,7 +1927,7 @@ static void eax_mac_block(uint8_t mac[AES_BLOCKLEN],
   Cipher((state_t*)mac, round_key);
 }
 
-#if defined(EAX) && (EAX == 1)
+#if defined(AES_ENABLE_EAX) && (AES_ENABLE_EAX == 1)
 static void eax_key_constants(const struct AES_ctx* aes,
                               uint8_t d[AES_BLOCKLEN],
                               uint8_t q[AES_BLOCKLEN])
@@ -1938,7 +1941,7 @@ static void eax_key_constants(const struct AES_ctx* aes,
 }
 #endif
 
-#if defined(EAX_PRIME) && (EAX_PRIME == 1)
+#if defined(AES_ENABLE_EAX_PRIME) && (AES_ENABLE_EAX_PRIME == 1)
 static void eax_prime_key_constants(const struct AES_ctx* aes,
                                     uint8_t d[AES_BLOCKLEN],
                                     uint8_t q[AES_BLOCKLEN])
@@ -2006,7 +2009,7 @@ static void eax_cmac(const struct AES_ctx* aes,
   aes_copy_bytes(result, mac, AES_BLOCKLEN);
 }
 
-#if defined(EAX) && (EAX == 1)
+#if defined(AES_ENABLE_EAX) && (AES_ENABLE_EAX == 1)
 static void eax_omac(const struct AES_ctx* aes, const uint8_t d[AES_BLOCKLEN],
                      const uint8_t q[AES_BLOCKLEN], uint8_t domain,
                      const uint8_t* data, size_t length,
@@ -2056,7 +2059,7 @@ static void eax_ctr_xor(const struct AES_ctx* aes,
   }
 }
 
-#if defined(EAX) && (EAX == 1)
+#if defined(AES_ENABLE_EAX) && (AES_ENABLE_EAX == 1)
 
 static int eax_crypt(const uint8_t* key, const uint8_t* nonce,
                      size_t nonce_len, const uint8_t* aad, size_t aad_len,
@@ -2139,7 +2142,7 @@ int AES_EAX_decrypt(const uint8_t* key, const uint8_t* nonce,
 
 #endif /* EAX */
 
-#if defined(EAX_PRIME) && (EAX_PRIME == 1)
+#if defined(AES_ENABLE_EAX_PRIME) && (AES_ENABLE_EAX_PRIME == 1)
 
 static int eax_prime_crypt(const uint8_t* key, const uint8_t* cleartext,
                            size_t cleartext_len, const uint8_t* input,
@@ -2222,7 +2225,7 @@ int AES_EAX_PRIME_decrypt(const uint8_t* key, const uint8_t* cleartext,
 #endif // EAX or EAX_PRIME
 
 /* AES-CMAC (SP 800-38B) shared by public CMAC and SIV-S2V. */
-#if (defined(CMAC) && (CMAC == 1)) || (defined(SIV) && (SIV == 1))
+#if (defined(AES_ENABLE_CMAC) && (AES_ENABLE_CMAC == 1)) || (defined(AES_ENABLE_SIV) && (AES_ENABLE_SIV == 1))
 
 /* Left-shift in GF(2^128), poly x^128+x^7+x^2+x+1 (SP 800-38B / RFC 5297). */
 static void aes_cmac_dbl(uint8_t value[AES_BLOCKLEN])
@@ -2331,7 +2334,7 @@ static void aes_cmac(const uint8_t* round_key, const uint8_t* data,
   aes_cmac_concat(round_key, data, length, NULL, 0, out);
 }
 
-#if defined(CMAC) && (CMAC == 1)
+#if defined(AES_ENABLE_CMAC) && (AES_ENABLE_CMAC == 1)
 
 int AES_CMAC(const uint8_t* key, const uint8_t* msg, size_t msg_len,
              uint8_t* tag, size_t tag_len)
@@ -2380,7 +2383,7 @@ int AES_CMAC_verify(const uint8_t* key, const uint8_t* msg, size_t msg_len,
 
 #endif /* CMAC */
 
-#if defined(SIV) && (SIV == 1)
+#if defined(AES_ENABLE_SIV) && (AES_ENABLE_SIV == 1)
 
 static void siv_s2v(const uint8_t* k1_round, const uint8_t* const* ad,
                     const size_t* ad_lens, size_t ad_count,

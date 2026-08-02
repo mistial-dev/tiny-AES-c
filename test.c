@@ -14,7 +14,7 @@
 #include "aes.h"
 #include "munit.h"
 #include "test_vectors.h"
-#if defined(GCM) && (GCM == 1)
+#if defined(AES_ENABLE_GCM) && (AES_ENABLE_GCM == 1)
 #include "gcm_test_vectors.h"
 #endif
 
@@ -53,7 +53,7 @@ static void test_initialize_sbox(void)
 }
 #endif
 
-#if defined(GCM) && (GCM == 1) && \
+#if defined(AES_ENABLE_GCM) && (AES_ENABLE_GCM == 1) && \
     AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_HARDWARE
 /* Test-only reference hook for validating the hardware dispatch path. */
 void AES_CAVP_GHASH_HARDWARE_MULTIPLY(uint8_t* result,
@@ -88,16 +88,16 @@ void AES_CAVP_GHASH_HARDWARE_MULTIPLY(uint8_t* result,
 #if defined(AES_CAVP) && (AES_CAVP == 1)
 MunitResult test_cavp(const MunitParameter params[], void* data);
 #endif
-#if defined(EAX) && (EAX == 1)
+#if defined(AES_ENABLE_EAX) && (AES_ENABLE_EAX == 1)
 MunitResult test_eax(const MunitParameter params[], void* data);
 #endif
-#if defined(EAX_PRIME) && (EAX_PRIME == 1)
+#if defined(AES_ENABLE_EAX_PRIME) && (AES_ENABLE_EAX_PRIME == 1)
 MunitResult test_eax_prime(const MunitParameter params[], void* data);
 #endif
-#if defined(SIV) && (SIV == 1)
+#if defined(AES_ENABLE_SIV) && (AES_ENABLE_SIV == 1)
 MunitResult test_siv(const MunitParameter params[], void* data);
 #endif
-#if defined(CMAC) && (CMAC == 1)
+#if defined(AES_ENABLE_CMAC) && (AES_ENABLE_CMAC == 1)
 MunitResult test_cmac(const MunitParameter params[], void* data);
 #endif
 
@@ -138,7 +138,7 @@ static MunitResult test_secure_zero_and_clear(const MunitParameter params[],
   return MUNIT_OK;
 }
 
-#if defined(GCM) && (GCM == 1)
+#if defined(AES_ENABLE_GCM) && (AES_ENABLE_GCM == 1)
 #if defined(AES256) && (AES256 == 1)
 #define TEST_GCM_VECTOR gcm_test_vectors[2]
 #elif defined(AES192) && (AES192 == 1)
@@ -148,7 +148,7 @@ static MunitResult test_secure_zero_and_clear(const MunitParameter params[],
 #endif
 #endif
 
-#if defined(ECB) && (ECB == 1)
+#if defined(AES_ENABLE_ECB) && (AES_ENABLE_ECB == 1)
 static MunitResult test_ecb(const MunitParameter params[], void* data)
 {
   struct AES_ctx ctx;
@@ -170,7 +170,7 @@ static MunitResult test_ecb(const MunitParameter params[], void* data)
 }
 #endif
 
-#if defined(CBC) && (CBC == 1)
+#if defined(AES_ENABLE_CBC) && (AES_ENABLE_CBC == 1)
 static MunitResult test_cbc(const MunitParameter params[], void* data)
 {
   struct AES_ctx ctx;
@@ -211,7 +211,7 @@ static MunitResult test_cbc_alignment(const MunitParameter params[], void* data)
 }
 #endif
 
-#if defined(CTR) && (CTR == 1)
+#if defined(AES_ENABLE_CTR) && (AES_ENABLE_CTR == 1)
 static MunitResult test_ctr(const MunitParameter params[], void* data)
 {
   struct AES_ctx ctx;
@@ -291,7 +291,7 @@ static MunitResult test_ctr_wrap(const MunitParameter params[], void* data)
 }
 #endif
 
-#if defined(OFB) && (OFB == 1)
+#if defined(AES_ENABLE_OFB) && (AES_ENABLE_OFB == 1)
 static MunitResult test_ofb(const MunitParameter params[], void* data)
 {
   static const size_t encrypt_chunks[] = { 1, 15, 17, 31 };
@@ -353,7 +353,7 @@ static MunitResult test_ofb(const MunitParameter params[], void* data)
 }
 #endif
 
-#if defined(CCM) && (CCM == 1)
+#if defined(AES_ENABLE_CCM) && (AES_ENABLE_CCM == 1)
 #if !defined(AES192) && !defined(AES256)
 static void test_ccm_vector(const uint8_t* key, const uint8_t* nonce,
                             size_t nonce_len, const uint8_t* aad,
@@ -595,7 +595,7 @@ static MunitResult test_ccm_api(const MunitParameter params[], void* data)
 
 #endif
 
-#if defined(GCM) && (GCM == 1)
+#if defined(AES_ENABLE_GCM) && (AES_ENABLE_GCM == 1)
 static MunitResult test_gcm(const MunitParameter params[], void* data)
 {
   const struct gcm_test_vector* vector = &TEST_GCM_VECTOR;
@@ -853,48 +853,48 @@ static MunitTest test_suite_tests[] = {
    * missing AES_init_sbox() in a later test. On Unix, each test is forked and
    * gets a fresh BSS, so the same bug fails there immediately.
    */
-#if defined(SIV) && (SIV == 1)
+#if defined(AES_ENABLE_SIV) && (AES_ENABLE_SIV == 1)
   { "/siv", test_siv, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #endif
-#if defined(CMAC) && (CMAC == 1)
+#if defined(AES_ENABLE_CMAC) && (AES_ENABLE_CMAC == 1)
   { "/cmac", test_cmac, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #endif
-#if defined(EAX) && (EAX == 1)
+#if defined(AES_ENABLE_EAX) && (AES_ENABLE_EAX == 1)
   { "/eax", test_eax, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #endif
-#if defined(EAX_PRIME) && (EAX_PRIME == 1)
+#if defined(AES_ENABLE_EAX_PRIME) && (AES_ENABLE_EAX_PRIME == 1)
   { "/eax-prime", test_eax_prime, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #endif
   { "/key-schedule", test_key_schedule, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
   { "/secure-zero-clear", test_secure_zero_and_clear, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
-#if defined(ECB) && (ECB == 1)
+#if defined(AES_ENABLE_ECB) && (AES_ENABLE_ECB == 1)
   { "/ecb", test_ecb, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #endif
-#if defined(CBC) && (CBC == 1)
+#if defined(AES_ENABLE_CBC) && (AES_ENABLE_CBC == 1)
   { "/cbc", test_cbc, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
   { "/cbc-alignment", test_cbc_alignment, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #endif
-#if defined(CTR) && (CTR == 1)
+#if defined(AES_ENABLE_CTR) && (AES_ENABLE_CTR == 1)
   { "/ctr", test_ctr, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
   { "/ctr-unaligned", test_ctr_unaligned, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
   { "/ctr-wrap", test_ctr_wrap, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #endif
-#if defined(OFB) && (OFB == 1)
+#if defined(AES_ENABLE_OFB) && (AES_ENABLE_OFB == 1)
   { "/ofb", test_ofb, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #endif
 #if defined(AES_CAVP) && (AES_CAVP == 1) && \
-    ((defined(ECB) && (ECB == 1)) || (defined(CBC) && (CBC == 1)) || \
-     (defined(OFB) && (OFB == 1)) || (defined(GCM) && (GCM == 1)) || \
-     (defined(CCM) && (CCM == 1)))
+    ((defined(AES_ENABLE_ECB) && (AES_ENABLE_ECB == 1)) || (defined(AES_ENABLE_CBC) && (AES_ENABLE_CBC == 1)) || \
+     (defined(AES_ENABLE_OFB) && (AES_ENABLE_OFB == 1)) || (defined(AES_ENABLE_GCM) && (AES_ENABLE_GCM == 1)) || \
+     (defined(AES_ENABLE_CCM) && (AES_ENABLE_CCM == 1)))
   { "/cavp", test_cavp, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #endif
-#if defined(CCM) && (CCM == 1)
+#if defined(AES_ENABLE_CCM) && (AES_ENABLE_CCM == 1)
 #if !defined(AES192) && !defined(AES256)
   { "/ccm", test_ccm, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
   { "/ccm-api", test_ccm_api, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #endif
 #endif
-#if defined(GCM) && (GCM == 1)
+#if defined(AES_ENABLE_GCM) && (AES_ENABLE_GCM == 1)
   { "/gcm", test_gcm, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
   { "/gcm-direction", test_gcm_direction, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
   { "/gcm-oneshot", test_gcm_oneshot, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },

@@ -3,8 +3,8 @@
  * SPDX-FileCopyrightText: Mistial Dev
  * SPDX-License-Identifier: Unlicense
  */
-#ifndef _AES_HPP_
-#define _AES_HPP_
+#ifndef TINY_AES_HPP_
+#define TINY_AES_HPP_
 
 #ifndef __cplusplus
 #error Do not include the hpp header in a c project!
@@ -14,4 +14,4 @@ extern "C" {
 #include "aes.h"
 }
 
-#endif //_AES_HPP_
+#endif //TINY_AES_HPP_

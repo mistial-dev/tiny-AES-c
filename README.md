@@ -54,8 +54,7 @@ make AES_ENABLE_CBC=1 AES_ENABLE_GCM=1
 cmake -S . -B build -DTINY_AES_ENABLE_CBC=ON -DTINY_AES_ENABLE_GCM=ON
 ```
 
-Direct inclusion: define `CBC`, `ECB`, `CTR`, `OFB`, `GCM`, `CCM`, `EAX`,
-`EAX_PRIME`, `SIV`, and/or `CMAC` to `1` before including `aes.h`.
+Direct inclusion: define `AES_ENABLE_CBC`, `AES_ENABLE_ECB`, `AES_ENABLE_CTR`, `AES_ENABLE_OFB`, `AES_ENABLE_GCM`, `AES_ENABLE_CCM`, `AES_ENABLE_EAX`, `AES_ENABLE_EAX_PRIME`, `AES_ENABLE_SIV`, and/or `AES_ENABLE_CMAC` to `1` before including `aes.h`.
 
 ### Security and size profiles
 

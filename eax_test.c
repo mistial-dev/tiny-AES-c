@@ -16,10 +16,10 @@
 #define EAX_VECTOR_FILE "test_vectors/eax/aes_eax_test.json"
 #endif
 
-#if (defined(EAX) && (EAX == 1)) || \
-    (defined(EAX_PRIME) && (EAX_PRIME == 1))
+#if (defined(AES_ENABLE_EAX) && (AES_ENABLE_EAX == 1)) || \
+    (defined(AES_ENABLE_EAX_PRIME) && (AES_ENABLE_EAX_PRIME == 1))
 
-#if defined(EAX) && (EAX == 1)
+#if defined(AES_ENABLE_EAX) && (AES_ENABLE_EAX == 1)
 
 #if !defined(AES192) && !defined(AES256)
 struct eax_rfc_vector
@@ -359,7 +359,7 @@ MunitResult test_eax(const MunitParameter params[], void* data)
 
 #endif /* EAX */
 
-#if defined(EAX_PRIME) && (EAX_PRIME == 1)
+#if defined(AES_ENABLE_EAX_PRIME) && (AES_ENABLE_EAX_PRIME == 1)
 
 static MunitResult test_eax_prime_worked(const MunitParameter params[],
                                          void* data)

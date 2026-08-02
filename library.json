@@ -16,6 +16,6 @@
     "examples": "test.c",
     "build":
 	{
-		"srcFilter": "+<*> -<.git/> -<test.c> -<test.cpp> -<test_package/>"
+		"srcFilter": "+<aes.c> +<aes.h> +<aes.hpp>"
 	}
 }

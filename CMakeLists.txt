@@ -55,11 +55,11 @@ endif()
 
 function(tiny_aes_mode_definitions output cbc ecb ctr ofb eax)
     set(${output}
-        CBC=${cbc}
-        ECB=${ecb}
-        CTR=${ctr}
-        OFB=${ofb}
-        EAX=${eax}
+        AES_ENABLE_CBC=${cbc}
+        AES_ENABLE_ECB=${ecb}
+        AES_ENABLE_CTR=${ctr}
+        AES_ENABLE_OFB=${ofb}
+        AES_ENABLE_EAX=${eax}
         ${TINY_AES_SBOX_DEFINITION}
         ${TINY_AES_WIDE_DEFINITION}
         PARENT_SCOPE
@@ -140,11 +140,11 @@ if(TINY_AES_TINY)
 else()
     set(TINY_AES_TINY_VALUE 0)
 endif()
-list(APPEND tiny_aes_library_definitions GCM=${TINY_AES_GCM}
-    CCM=${TINY_AES_CCM}
-    EAX_PRIME=${TINY_AES_EAX_PRIME}
-    SIV=${TINY_AES_SIV}
-    CMAC=${TINY_AES_CMAC}
+list(APPEND tiny_aes_library_definitions AES_ENABLE_GCM=${TINY_AES_GCM}
+    AES_ENABLE_CCM=${TINY_AES_CCM}
+    AES_ENABLE_EAX_PRIME=${TINY_AES_EAX_PRIME}
+    AES_ENABLE_SIV=${TINY_AES_SIV}
+    AES_ENABLE_CMAC=${TINY_AES_CMAC}
     AES_ZEROIZE=${TINY_AES_ZEROIZE_VALUE}
     AES_STRICT=${TINY_AES_STRICT_VALUE}
     AES_TINY=${TINY_AES_TINY_VALUE}
@@ -157,7 +157,7 @@ target_compile_definitions(tiny-aes PUBLIC ${tiny_aes_library_definitions})
 if(TINY_AES_ENABLE_GCM)
     add_executable(tiny-aes-benchmark benchmark.c)
     target_link_libraries(tiny-aes-benchmark PRIVATE tiny-aes)
-    target_compile_definitions(tiny-aes-benchmark PRIVATE GCM=1 AES128=1)
+    target_compile_definitions(tiny-aes-benchmark PRIVATE AES_ENABLE_GCM=1 AES128=1)
 endif()
 
 if(TINY_AES_BUILD_TESTS)
@@ -233,7 +233,7 @@ if(TINY_AES_BUILD_TESTS)
             set(cmac_min_tag)
         endif()
         target_compile_definitions(test_core_${test_name} PRIVATE
-            CBC=${cbc} ECB=${ecb} CTR=${ctr} OFB=${ofb} GCM=${gcm} CCM=${ccm} EAX=${eax_mode} EAX_PRIME=${eax_prime_mode} SIV=${siv_mode} CMAC=${cmac_mode}
+            AES_ENABLE_CBC=${cbc} AES_ENABLE_ECB=${ecb} AES_ENABLE_CTR=${ctr} AES_ENABLE_OFB=${ofb} AES_ENABLE_GCM=${gcm} AES_ENABLE_CCM=${ccm} AES_ENABLE_EAX=${eax_mode} AES_ENABLE_EAX_PRIME=${eax_prime_mode} AES_ENABLE_SIV=${siv_mode} AES_ENABLE_CMAC=${cmac_mode}
             AES_CAVP=${cavp}
             AES_GCM_GHASH_MODE=${ghash_index}
             ${key_definition} ${sbox_definition} AES_WIDE_OPS=${wide}

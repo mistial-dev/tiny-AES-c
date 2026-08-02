@@ -3,11 +3,15 @@
  * SPDX-FileCopyrightText: Mistial Dev
  * SPDX-License-Identifier: Unlicense
  */
-#ifndef _AES_H_
-#define _AES_H_
+#ifndef TINY_AES_H_
+#define TINY_AES_H_
 
 #include <stdint.h>
 #include <stddef.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* Status codes used by every fallible API in this library. */
 #define AES_OK   0
@@ -20,44 +24,44 @@
  * SIV, and CMAC are opt-in so unused modes do not contribute code or context
  * fields.
  */
-#ifndef CBC
-  #define CBC 0
+#ifndef AES_ENABLE_CBC
+  #define AES_ENABLE_CBC 0
 #endif
 
-#ifndef ECB
-  #define ECB 0
+#ifndef AES_ENABLE_ECB
+  #define AES_ENABLE_ECB 0
 #endif
 
-#ifndef CTR
-  #define CTR 1
+#ifndef AES_ENABLE_CTR
+  #define AES_ENABLE_CTR 1
 #endif
 
-#ifndef OFB
-  #define OFB 0
+#ifndef AES_ENABLE_OFB
+  #define AES_ENABLE_OFB 0
 #endif
 
-#ifndef GCM
-  #define GCM 0
+#ifndef AES_ENABLE_GCM
+  #define AES_ENABLE_GCM 0
 #endif
 
-#ifndef CCM
-  #define CCM 0
+#ifndef AES_ENABLE_CCM
+  #define AES_ENABLE_CCM 0
 #endif
 
-#ifndef EAX
-  #define EAX 0
+#ifndef AES_ENABLE_EAX
+  #define AES_ENABLE_EAX 0
 #endif
 
-#ifndef EAX_PRIME
-  #define EAX_PRIME 0
+#ifndef AES_ENABLE_EAX_PRIME
+  #define AES_ENABLE_EAX_PRIME 0
 #endif
 
-#ifndef SIV
-  #define SIV 0
+#ifndef AES_ENABLE_SIV
+  #define AES_ENABLE_SIV 0
 #endif
 
-#ifndef CMAC
-  #define CMAC 0
+#ifndef AES_ENABLE_CMAC
+  #define AES_ENABLE_CMAC 0
 #endif
 
 /* When 1 (default), one-shot paths wipe stack key material on exit. */
@@ -187,10 +191,10 @@ void AES_GCM_GHASH_HARDWARE_MULTIPLY(uint8_t* result,
 struct AES_ctx
 {
   uint8_t RoundKey[AES_KEY_EXP_SIZE];
-#if (defined(CBC) && (CBC == 1)) || (defined(CTR) && (CTR == 1)) || \
-    (defined(OFB) && (OFB == 1))
+#if (defined(AES_ENABLE_CBC) && (AES_ENABLE_CBC == 1)) || (defined(AES_ENABLE_CTR) && (AES_ENABLE_CTR == 1)) || \
+    (defined(AES_ENABLE_OFB) && (AES_ENABLE_OFB == 1))
   uint8_t Iv[AES_BLOCKLEN];
-#if defined(OFB) && (OFB == 1)
+#if defined(AES_ENABLE_OFB) && (AES_ENABLE_OFB == 1)
   uint8_t ofb_pos;
 #endif
 #endif
@@ -212,19 +216,19 @@ void AES_CAVP_decrypt_block(const uint8_t* key, uint8_t block[AES_BLOCKLEN]);
 /* Must be called once before AES_init_ctx(), AES_init_ctx_iv(), or encryption. */
 void AES_init_sbox(void);
 #endif
-#if (defined(CBC) && (CBC == 1)) || (defined(CTR) && (CTR == 1)) || \
-    (defined(OFB) && (OFB == 1))
+#if (defined(AES_ENABLE_CBC) && (AES_ENABLE_CBC == 1)) || (defined(AES_ENABLE_CTR) && (AES_ENABLE_CTR == 1)) || \
+    (defined(AES_ENABLE_OFB) && (AES_ENABLE_OFB == 1))
 void AES_init_ctx_iv(struct AES_ctx* ctx, const uint8_t* key, const uint8_t* iv);
 void AES_ctx_set_iv(struct AES_ctx* ctx, const uint8_t* iv);
 #endif
 
-#if defined(ECB) && (ECB == 1)
+#if defined(AES_ENABLE_ECB) && (AES_ENABLE_ECB == 1)
 /* Buffer must be exactly AES_BLOCKLEN bytes. ECB is insecure for most uses. */
 void AES_ECB_encrypt(const struct AES_ctx* ctx, uint8_t* buf);
 void AES_ECB_decrypt(const struct AES_ctx* ctx, uint8_t* buf);
 #endif
 
-#if defined(CBC) && (CBC == 1)
+#if defined(AES_ENABLE_CBC) && (AES_ENABLE_CBC == 1)
 /*
  * Buffer length must be a multiple of AES_BLOCKLEN (no padding is applied).
  * Returns AES_ERR if length is not block-aligned. Set IV via AES_init_ctx_iv()
@@ -234,7 +238,7 @@ int AES_CBC_encrypt(struct AES_ctx* ctx, uint8_t* buf, size_t length);
 int AES_CBC_decrypt(struct AES_ctx* ctx, uint8_t* buf, size_t length);
 #endif
 
-#if defined(CTR) && (CTR == 1)
+#if defined(AES_ENABLE_CTR) && (AES_ENABLE_CTR == 1)
 /*
  * Encrypt and decrypt are the same operation. The IV is incremented for every
  * block. Returns AES_ERR if the request would wrap the 128-bit counter (buf
@@ -243,7 +247,7 @@ int AES_CBC_decrypt(struct AES_ctx* ctx, uint8_t* buf, size_t length);
 int AES_CTR_crypt(struct AES_ctx* ctx, uint8_t* buf, size_t length);
 #endif
 
-#if defined(OFB) && (OFB == 1)
+#if defined(AES_ENABLE_OFB) && (AES_ENABLE_OFB == 1)
 /*
  * Encrypt and decrypt are the same operation. Never reuse an IV with the same
  * key. OFB provides confidentiality only.
@@ -251,7 +255,7 @@ int AES_CTR_crypt(struct AES_ctx* ctx, uint8_t* buf, size_t length);
 int AES_OFB_crypt(struct AES_ctx* ctx, uint8_t* buf, size_t length);
 #endif
 
-#if defined(GCM) && (GCM == 1)
+#if defined(AES_ENABLE_GCM) && (AES_ENABLE_GCM == 1)
 
 /*
  * NIST SP 800-38D length limits (bit lengths converted to bytes):
@@ -340,9 +344,9 @@ int AES_GCM_decrypt(const uint8_t* key,
 /* Clear expanded key material and intermediate authentication state. */
 void AES_GCM_clear(struct AES_GCM_ctx* ctx);
 
-#endif /* GCM */
+#endif /* AES_ENABLE_GCM */
 
-#if defined(CCM) && (CCM == 1)
+#if defined(AES_ENABLE_CCM) && (AES_ENABLE_CCM == 1)
 
 /* CCM is a packet mode: payload and AAD lengths are known at entry. */
 int AES_CCM_encrypt(const uint8_t* key, const uint8_t* nonce,
@@ -357,7 +361,7 @@ int AES_CCM_decrypt(const uint8_t* key, const uint8_t* nonce,
 
 #endif
 
-#if defined(EAX) && (EAX == 1)
+#if defined(AES_ENABLE_EAX) && (AES_ENABLE_EAX == 1)
 
 /* EAX one-shot AEAD. Tags must be AES_EAX_MIN_TAG_LEN..16. Auth failure
  * leaves plaintext untouched. */
@@ -372,7 +376,7 @@ int AES_EAX_decrypt(const uint8_t* key, const uint8_t* nonce,
 
 #endif
 
-#if defined(EAX_PRIME) && (EAX_PRIME == 1)
+#if defined(AES_ENABLE_EAX_PRIME) && (AES_ENABLE_EAX_PRIME == 1)
 
 #define AES_EAX_PRIME_TAG_LEN 4
 
@@ -389,7 +393,7 @@ int AES_EAX_PRIME_decrypt(const uint8_t* key, const uint8_t* cleartext,
 
 #endif
 
-#if defined(CMAC) && (CMAC == 1)
+#if defined(AES_ENABLE_CMAC) && (AES_ENABLE_CMAC == 1)
 
 /* Full CMAC tag is one AES block; shorter tags are the leading tag_len bytes. */
 #define AES_CMAC_TAG_MAX AES_BLOCKLEN
@@ -410,7 +414,7 @@ int AES_CMAC_verify(const uint8_t* key, const uint8_t* msg, size_t msg_len,
 
 #endif
 
-#if defined(SIV) && (SIV == 1)
+#if defined(AES_ENABLE_SIV) && (AES_ENABLE_SIV == 1)
 
 /* RFC 5297 SIV-AES: key is two equal AES keys concatenated (CMAC || CTR). */
 #define AES_SIV_KEYLEN   (AES_KEYLEN * 2)
@@ -442,4 +446,8 @@ int AES_SIV_decrypt(const uint8_t* key,
 
 #endif
 
-#endif /* _AES_H_ */
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* TINY_AES_H_ */

@@ -6,3 +6,6 @@
 /test.elf
 /test.map
 test_package/build
+.tiny-aes-tests/
+build*/
+.pio/

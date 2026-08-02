@@ -17,7 +17,7 @@
 #define SIV_VECTOR_FILE "test_vectors/siv/aead_aes_siv_cmac_test.json"
 #endif
 
-#if defined(SIV) && (SIV == 1)
+#if defined(AES_ENABLE_SIV) && (AES_ENABLE_SIV == 1)
 
 #if AES_SBOX_MODE == AES_SBOX_MODE_RUNTIME
 static void siv_initialize_sbox(void)
