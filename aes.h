@@ -270,6 +270,24 @@ int AES_GCM_encrypt_finish(struct AES_GCM_ctx* ctx, uint8_t* tag,
 int AES_GCM_decrypt_finish(struct AES_GCM_ctx* ctx, const uint8_t* tag,
                            size_t tag_len);
 
+/*
+ * One-shot GCM. Decrypt authenticates before writing plaintext; on
+ * authentication failure the plaintext buffer is left untouched when it does
+ * not alias the ciphertext, and is zeroed when the buffers alias in place.
+ * Prefer these helpers over the streaming API when the full message is known.
+ */
+int AES_GCM_encrypt(const uint8_t* key,
+                    const uint8_t* iv, size_t iv_len,
+                    const uint8_t* aad, size_t aad_len,
+                    const uint8_t* plaintext, size_t plaintext_len,
+                    uint8_t* ciphertext, uint8_t* tag, size_t tag_len);
+int AES_GCM_decrypt(const uint8_t* key,
+                    const uint8_t* iv, size_t iv_len,
+                    const uint8_t* aad, size_t aad_len,
+                    const uint8_t* ciphertext, size_t ciphertext_len,
+                    const uint8_t* tag, size_t tag_len,
+                    uint8_t* plaintext);
+
 /* Clear expanded key material and intermediate authentication state. */
 void AES_GCM_clear(struct AES_GCM_ctx* ctx);
 

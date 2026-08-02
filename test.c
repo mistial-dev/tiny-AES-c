@@ -697,6 +697,60 @@ static MunitResult test_gcm_non96_iv(const MunitParameter params[], void* data)
   return MUNIT_OK;
 }
 #endif
+
+static MunitResult test_gcm_oneshot(const MunitParameter params[], void* data)
+{
+  const struct gcm_test_vector* vector = &TEST_GCM_VECTOR;
+  uint8_t ciphertext[64];
+  uint8_t plaintext[64];
+  uint8_t tag[16];
+  uint8_t bad_tag[16];
+  uint8_t poison[64];
+  size_t i;
+
+  (void) params;
+  (void) data;
+
+  test_initialize_sbox();
+  munit_assert_size(vector->length, <=, sizeof(ciphertext));
+
+  munit_assert_int(AES_GCM_encrypt(vector->key, vector->iv, vector->iv_len,
+                                   vector->aad, vector->aad_len,
+                                   vector->plaintext, vector->length,
+                                   ciphertext, tag, vector->tag_len), ==,
+                   AES_OK);
+  munit_assert_memory_equal(vector->length, ciphertext, vector->ciphertext);
+  munit_assert_memory_equal(vector->tag_len, tag, vector->tag);
+
+  memset(plaintext, 0xa5, sizeof(plaintext));
+  munit_assert_int(AES_GCM_decrypt(vector->key, vector->iv, vector->iv_len,
+                                   vector->aad, vector->aad_len,
+                                   ciphertext, vector->length, tag,
+                                   vector->tag_len, plaintext), ==, AES_OK);
+  munit_assert_memory_equal(vector->length, plaintext, vector->plaintext);
+
+  /* Bad tag must not write plaintext (non-aliasing buffers). */
+  memcpy(bad_tag, tag, vector->tag_len);
+  bad_tag[0] ^= 1u;
+  memset(poison, 0x3c, sizeof(poison));
+  munit_assert_int(AES_GCM_decrypt(vector->key, vector->iv, vector->iv_len,
+                                   vector->aad, vector->aad_len,
+                                   ciphertext, vector->length, bad_tag,
+                                   vector->tag_len, poison), ==, AES_ERR);
+  for (i = 0; i < vector->length; ++i)
+    munit_assert_uint8(poison[i], ==, 0x3c);
+
+  /* In-place decrypt with bad tag zeros the shared buffer. */
+  memcpy(ciphertext, vector->ciphertext, vector->length);
+  munit_assert_int(AES_GCM_decrypt(vector->key, vector->iv, vector->iv_len,
+                                   vector->aad, vector->aad_len,
+                                   ciphertext, vector->length, bad_tag,
+                                   vector->tag_len, ciphertext), ==, AES_ERR);
+  for (i = 0; i < vector->length; ++i)
+    munit_assert_uint8(ciphertext[i], ==, 0);
+
+  return MUNIT_OK;
+}
 #endif
 
 static MunitTest test_suite_tests[] = {
@@ -732,6 +786,7 @@ static MunitTest test_suite_tests[] = {
 #if defined(GCM) && (GCM == 1)
   { "/gcm", test_gcm, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
   { "/gcm-direction", test_gcm_direction, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+  { "/gcm-oneshot", test_gcm_oneshot, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #if !defined(AES192) && !defined(AES256)
   { "/gcm-non96-iv", test_gcm_non96_iv, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #endif

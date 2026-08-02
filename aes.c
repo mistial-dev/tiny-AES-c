@@ -1375,6 +1375,130 @@ void AES_GCM_clear(struct AES_GCM_ctx* ctx)
   AES_secure_zero(ctx, sizeof(*ctx));
 }
 
+int AES_GCM_encrypt(const uint8_t* key,
+                    const uint8_t* iv, size_t iv_len,
+                    const uint8_t* aad, size_t aad_len,
+                    const uint8_t* plaintext, size_t plaintext_len,
+                    uint8_t* ciphertext, uint8_t* tag, size_t tag_len)
+{
+  struct AES_GCM_ctx ctx;
+  int status;
+
+  if (key == NULL || iv == NULL || iv_len == 0 ||
+      (aad_len != 0 && aad == NULL) ||
+      (plaintext_len != 0 && (plaintext == NULL || ciphertext == NULL)) ||
+      tag == NULL || !gcm_tag_length_is_valid(tag_len))
+    return AES_ERR;
+
+  if (AES_GCM_init(&ctx, key, iv, iv_len) != AES_OK)
+    return AES_ERR;
+  if (AES_GCM_aad_update(&ctx, aad, aad_len) != AES_OK)
+  {
+#if AES_ZEROIZE
+    AES_GCM_clear(&ctx);
+#endif
+    return AES_ERR;
+  }
+
+  if (plaintext != ciphertext && plaintext_len != 0)
+    aes_copy_bytes(ciphertext, plaintext, plaintext_len);
+
+  status = AES_GCM_encrypt_update(&ctx, ciphertext, plaintext_len);
+  if (status == AES_OK)
+    status = AES_GCM_encrypt_finish(&ctx, tag, tag_len);
+
+#if AES_ZEROIZE
+  AES_GCM_clear(&ctx);
+#endif
+  return status;
+}
+
+int AES_GCM_decrypt(const uint8_t* key,
+                    const uint8_t* iv, size_t iv_len,
+                    const uint8_t* aad, size_t aad_len,
+                    const uint8_t* ciphertext, size_t ciphertext_len,
+                    const uint8_t* tag, size_t tag_len,
+                    uint8_t* plaintext)
+{
+  struct AES_GCM_ctx ctx;
+  uint8_t expected[AES_BLOCKLEN] = { 0 };
+  uint8_t difference = 0;
+  size_t i;
+  int status = AES_ERR;
+
+  if (key == NULL || iv == NULL || iv_len == 0 ||
+      (aad_len != 0 && aad == NULL) ||
+      (ciphertext_len != 0 && (ciphertext == NULL || plaintext == NULL)) ||
+      tag == NULL || !gcm_tag_length_is_valid(tag_len))
+    return AES_ERR;
+
+  if (AES_GCM_init(&ctx, key, iv, iv_len) != AES_OK)
+    return AES_ERR;
+  if (AES_GCM_aad_update(&ctx, aad, aad_len) != AES_OK)
+    goto done;
+
+  /* Absorb ciphertext into GHASH without decrypting (auth-before-release). */
+  if (ctx.phase == AES_GCM_PHASE_AAD)
+  {
+    gcm_pad_ghash(&ctx);
+    ctx.phase = AES_GCM_PHASE_TEXT;
+  }
+  if (!gcm_length_is_valid(ctx.text_len, ciphertext_len, AES_GCM_MAX_TEXT_BYTES))
+    goto done;
+  gcm_absorb(&ctx, ciphertext, ciphertext_len);
+  ctx.text_len += (uint64_t)ciphertext_len;
+  ctx.direction = AES_GCM_DIRECTION_DECRYPT;
+
+  gcm_finish_ghash(&ctx);
+  gcm_make_tag(&ctx, expected);
+  for (i = 0; i < tag_len; ++i)
+    difference |= (uint8_t)(expected[i] ^ tag[i]);
+  ctx.phase = AES_GCM_PHASE_FINAL;
+
+  if (difference != 0)
+  {
+    if (plaintext != NULL && plaintext == ciphertext && ciphertext_len != 0)
+      AES_secure_zero(plaintext, ciphertext_len);
+    status = AES_ERR;
+    goto done;
+  }
+
+  /* Tag OK: produce keystream and decrypt. Reset counter path from J0. */
+  {
+    uint8_t counter[AES_BLOCKLEN];
+    uint8_t stream[AES_BLOCKLEN];
+    size_t offset = 0;
+
+    aes_copy_bytes(counter, ctx.J0, AES_BLOCKLEN);
+    while (offset < ciphertext_len)
+    {
+      const size_t count = ciphertext_len - offset < AES_BLOCKLEN ?
+                           ciphertext_len - offset : AES_BLOCKLEN;
+      uint8_t j;
+
+      gcm_increment_counter(counter);
+      aes_copy_bytes(stream, counter, AES_BLOCKLEN);
+      Cipher((state_t*)stream, ctx.aes.RoundKey);
+      for (j = 0; j < (uint8_t)count; ++j)
+        plaintext[offset + j] =
+          (uint8_t)(ciphertext[offset + j] ^ stream[j]);
+      offset += count;
+    }
+#if AES_ZEROIZE
+    AES_secure_zero(counter, sizeof(counter));
+    AES_secure_zero(stream, sizeof(stream));
+#endif
+  }
+  status = AES_OK;
+
+done:
+#if AES_ZEROIZE
+  AES_GCM_clear(&ctx);
+  AES_secure_zero(expected, sizeof(expected));
+#endif
+  return status;
+}
+
 #endif // #if defined(GCM) && (GCM == 1)
 
 #if defined(CCM) && (CCM == 1)
