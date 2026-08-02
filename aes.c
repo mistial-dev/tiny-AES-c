@@ -73,9 +73,11 @@ typedef uint8_t state_t[4][4];
 
 
 
-// The lookup-tables are marked const so they can be placed in read-only storage instead of RAM
-// The numbers below can be computed dynamically trading ROM for RAM - 
-// This can be useful in (embedded) bootloader applications, where ROM is often limited.
+// The default lookup-tables are const so they can be placed in read-only
+// storage. Runtime S-box mode trades this table storage for a fixed RAM table.
+#if AES_SBOX_MODE == AES_SBOX_MODE_RUNTIME
+static uint8_t sbox[256];
+#else
 static const uint8_t sbox[256] = {
   //0     1    2      3     4    5     6     7      8    9     A      B    C     D     E     F
   0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
@@ -94,8 +96,12 @@ static const uint8_t sbox[256] = {
   0x70, 0x3e, 0xb5, 0x66, 0x48, 0x03, 0xf6, 0x0e, 0x61, 0x35, 0x57, 0xb9, 0x86, 0xc1, 0x1d, 0x9e,
   0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf,
   0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16 };
+#endif
 
 #if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1)
+#if AES_SBOX_MODE == AES_SBOX_MODE_RUNTIME
+static uint8_t rsbox[256];
+#else
 static const uint8_t rsbox[256] = {
   0x52, 0x09, 0x6a, 0xd5, 0x30, 0x36, 0xa5, 0x38, 0xbf, 0x40, 0xa3, 0x9e, 0x81, 0xf3, 0xd7, 0xfb,
   0x7c, 0xe3, 0x39, 0x82, 0x9b, 0x2f, 0xff, 0x87, 0x34, 0x8e, 0x43, 0x44, 0xc4, 0xde, 0xe9, 0xcb,
@@ -113,6 +119,7 @@ static const uint8_t rsbox[256] = {
   0x60, 0x51, 0x7f, 0xa9, 0x19, 0xb5, 0x4a, 0x0d, 0x2d, 0xe5, 0x7a, 0x9f, 0x93, 0xc9, 0x9c, 0xef,
   0xa0, 0xe0, 0x3b, 0x4d, 0xae, 0x2a, 0xf5, 0xb0, 0xc8, 0xeb, 0xbb, 0x3c, 0x83, 0x53, 0x99, 0x61,
   0x17, 0x2b, 0x04, 0x7e, 0xba, 0x77, 0xd6, 0x26, 0xe1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0c, 0x7d };
+#endif
 #endif
 
 // The round constant word array, Rcon[i], contains the values given by 
@@ -134,6 +141,121 @@ static const uint8_t Rcon[11] = {
 /*****************************************************************************/
 /* Private functions:                                                        */
 /*****************************************************************************/
+#if AES_SBOX_MODE == AES_SBOX_MODE_RUNTIME
+static uint8_t sbox_multiply(uint8_t a, uint8_t b)
+{
+  uint8_t result = 0;
+  unsigned i;
+
+  for (i = 0; i < 8; ++i)
+  {
+    result ^= (uint8_t)(0u - (uint8_t)(b & 1u)) & a;
+    a = (uint8_t)((a << 1) ^ (0x1bu & (uint8_t)(0u - (uint8_t)(a >> 7))));
+    b >>= 1;
+  }
+
+  return result;
+}
+
+static uint8_t sbox_inverse(uint8_t value)
+{
+  uint8_t result = 1;
+  uint8_t factor = value;
+  unsigned exponent = 254;
+
+  if (value == 0)
+    return 0;
+
+  while (exponent != 0)
+  {
+    if (exponent & 1u)
+      result = sbox_multiply(result, factor);
+    factor = sbox_multiply(factor, factor);
+    exponent >>= 1;
+  }
+
+  return result;
+}
+
+static uint8_t sbox_rotate_left(uint8_t value, unsigned count)
+{
+  return (uint8_t)((value << count) | (value >> (8u - count)));
+}
+
+void AES_init_sbox(void)
+{
+  unsigned i;
+
+  for (i = 0; i < 256; ++i)
+  {
+    const uint8_t inverse = sbox_inverse((uint8_t)i);
+    sbox[i] = (uint8_t)(inverse ^
+                        sbox_rotate_left(inverse, 1) ^
+                        sbox_rotate_left(inverse, 2) ^
+                        sbox_rotate_left(inverse, 3) ^
+                        sbox_rotate_left(inverse, 4) ^ 0x63);
+  }
+
+#if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1)
+  for (i = 0; i < 256; ++i)
+    rsbox[sbox[i]] = (uint8_t)i;
+#endif
+}
+#endif
+
+#if AES_WIDE_OPS && defined(UINTPTR_MAX) && defined(UINT32_MAX)
+#if defined(UINT64_MAX) && (UINTPTR_MAX >= UINT64_MAX)
+typedef uint64_t aes_word_t;
+#define AES_WIDE_OPS_ENABLED 1
+#elif UINTPTR_MAX >= UINT32_MAX
+typedef uint32_t aes_word_t;
+#define AES_WIDE_OPS_ENABLED 1
+#else
+#define AES_WIDE_OPS_ENABLED 0
+#endif
+#else
+#define AES_WIDE_OPS_ENABLED 0
+#endif
+
+static void aes_copy_bytes(uint8_t* dst, const uint8_t* src, size_t length)
+{
+#if AES_WIDE_OPS_ENABLED
+  while (length >= sizeof(aes_word_t))
+  {
+    aes_word_t word;
+    memcpy(&word, src, sizeof(word));
+    memcpy(dst, &word, sizeof(word));
+    src += sizeof(word);
+    dst += sizeof(word);
+    length -= sizeof(word);
+  }
+#endif
+  while (length-- != 0)
+    *dst++ = *src++;
+}
+
+#if defined(CBC) && (CBC == 1)
+static void aes_xor_block(uint8_t* dst, const uint8_t* src)
+{
+#if AES_WIDE_OPS_ENABLED
+  size_t offset;
+  for (offset = 0; offset < AES_BLOCKLEN; offset += sizeof(aes_word_t))
+  {
+    aes_word_t left;
+    aes_word_t right;
+    memcpy(&left, dst + offset, sizeof(left));
+    memcpy(&right, src + offset, sizeof(right));
+    left ^= right;
+    memcpy(dst + offset, &left, sizeof(left));
+  }
+#else
+  uint8_t i;
+  for (i = 0; i < AES_BLOCKLEN; ++i)
+    dst[i] ^= src[i];
+#endif
+}
+#endif
+
 /*
  * Read the S-box without using a secret-indexed lookup. Reading every entry
  * keeps the memory-access pattern independent of the input byte. The
@@ -142,6 +264,9 @@ static const uint8_t Rcon[11] = {
  */
 static uint8_t getSBoxValue(uint8_t num)
 {
+#if AES_SBOX_MODE == AES_SBOX_MODE_FAST
+  return sbox[num];
+#else
   const volatile uint8_t *table = sbox;
   uint8_t value = 0;
   unsigned i;
@@ -153,6 +278,7 @@ static uint8_t getSBoxValue(uint8_t num)
   }
 
   return value;
+#endif
 }
 
 // This function produces Nb(Nr+1) round keys. The round keys are used in each round to decrypt the states. 
@@ -162,13 +288,7 @@ static void KeyExpansion(uint8_t* RoundKey, const uint8_t* Key)
   uint8_t tempa[4]; // Used for the column/row operations
   
   // The first round key is the key itself.
-  for (i = 0; i < Nk; ++i)
-  {
-    RoundKey[(i * 4) + 0] = Key[(i * 4) + 0];
-    RoundKey[(i * 4) + 1] = Key[(i * 4) + 1];
-    RoundKey[(i * 4) + 2] = Key[(i * 4) + 2];
-    RoundKey[(i * 4) + 3] = Key[(i * 4) + 3];
-  }
+  aes_copy_bytes(RoundKey, Key, Nk * 4);
 
   // All other round keys are found from the previous round keys.
   for (i = Nk; i < Nb * (Nr + 1); ++i)
@@ -237,11 +357,11 @@ void AES_init_ctx(struct AES_ctx* ctx, const uint8_t* key)
 void AES_init_ctx_iv(struct AES_ctx* ctx, const uint8_t* key, const uint8_t* iv)
 {
   KeyExpansion(ctx->RoundKey, key);
-  memcpy (ctx->Iv, iv, AES_BLOCKLEN);
+  aes_copy_bytes(ctx->Iv, iv, AES_BLOCKLEN);
 }
 void AES_ctx_set_iv(struct AES_ctx* ctx, const uint8_t* iv)
 {
-  memcpy (ctx->Iv, iv, AES_BLOCKLEN);
+  aes_copy_bytes(ctx->Iv, iv, AES_BLOCKLEN);
 }
 #endif
 
@@ -351,6 +471,9 @@ static uint8_t Multiply(uint8_t x, uint8_t y)
 #if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1)
 static uint8_t getSBoxInvert(uint8_t num)
 {
+#if AES_SBOX_MODE == AES_SBOX_MODE_FAST
+  return rsbox[num];
+#else
   const volatile uint8_t *table = rsbox;
   uint8_t value = 0;
   unsigned i;
@@ -362,6 +485,7 @@ static uint8_t getSBoxInvert(uint8_t num)
   }
 
   return value;
+#endif
 }
 
 // MixColumns function mixes the columns of the state matrix.
@@ -511,11 +635,7 @@ void AES_ECB_decrypt(const struct AES_ctx* ctx, uint8_t* buf)
 
 static void XorWithIv(uint8_t* buf, const uint8_t* Iv)
 {
-  uint8_t i;
-  for (i = 0; i < AES_BLOCKLEN; ++i) // The block in AES is always 128bit no matter the key size
-  {
-    buf[i] ^= Iv[i];
-  }
+  aes_xor_block(buf, Iv);
 }
 
 void AES_CBC_encrypt_buffer(struct AES_ctx *ctx, uint8_t* buf, size_t length)
@@ -530,7 +650,7 @@ void AES_CBC_encrypt_buffer(struct AES_ctx *ctx, uint8_t* buf, size_t length)
     buf += AES_BLOCKLEN;
   }
   /* store Iv in ctx for next call */
-  memcpy(ctx->Iv, Iv, AES_BLOCKLEN);
+  aes_copy_bytes(ctx->Iv, Iv, AES_BLOCKLEN);
 }
 
 void AES_CBC_decrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length)
@@ -539,10 +659,10 @@ void AES_CBC_decrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length)
   uint8_t storeNextIv[AES_BLOCKLEN];
   for (i = 0; i < length; i += AES_BLOCKLEN)
   {
-    memcpy(storeNextIv, buf, AES_BLOCKLEN);
+    aes_copy_bytes(storeNextIv, buf, AES_BLOCKLEN);
     InvCipher((state_t*)buf, ctx->RoundKey);
     XorWithIv(buf, ctx->Iv);
-    memcpy(ctx->Iv, storeNextIv, AES_BLOCKLEN);
+    aes_copy_bytes(ctx->Iv, storeNextIv, AES_BLOCKLEN);
     buf += AES_BLOCKLEN;
   }
 
@@ -566,7 +686,7 @@ void AES_CTR_xcrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length)
     if (bi == AES_BLOCKLEN) /* we need to regen xor compliment in buffer */
     {
       
-      memcpy(buffer, ctx->Iv, AES_BLOCKLEN);
+      aes_copy_bytes(buffer, ctx->Iv, AES_BLOCKLEN);
       Cipher((state_t*)buffer,ctx->RoundKey);
 
       /* Increment Iv and handle overflow */

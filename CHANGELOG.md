@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Added configurable secure, runtime-generated, and fast S-box profiles plus
+  portable opt-in wide operations for embedded targets.
+- Made AES-128 the default only when no AES key-size macro is supplied, so
+  AES192 and AES256 can be selected directly by the build.
+- Added an exhaustive 126-configuration Make/CMake test matrix covering key
+  sizes, mode combinations, S-box profiles, and wide-operation settings.
 - Reworked the unit tests around vendored µunit (munit), added cross-platform
   CMake/CTest support, and organized the AES-128/192/256 NIST SP 800-38A
   Appendix F vectors into a shared test-vector header.

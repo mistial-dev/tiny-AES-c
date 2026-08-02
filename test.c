@@ -27,6 +27,18 @@
 #define TEST_CTR_CIPHERTEXT aes128_ctr_ciphertext
 #endif
 
+#if AES_SBOX_MODE == AES_SBOX_MODE_RUNTIME
+static void test_initialize_sbox(void)
+{
+  AES_init_sbox();
+}
+#else
+static void test_initialize_sbox(void)
+{
+}
+#endif
+
+#if defined(ECB) && (ECB == 1)
 static MunitResult test_ecb(const MunitParameter params[], void* data)
 {
   struct AES_ctx ctx;
@@ -35,6 +47,7 @@ static MunitResult test_ecb(const MunitParameter params[], void* data)
   (void) params;
   (void) data;
 
+  test_initialize_sbox();
   AES_init_ctx(&ctx, TEST_KEY);
   memcpy(buffer, nist_plaintext, AES_BLOCKLEN);
   AES_ECB_encrypt(&ctx, buffer);
@@ -45,7 +58,9 @@ static MunitResult test_ecb(const MunitParameter params[], void* data)
 
   return MUNIT_OK;
 }
+#endif
 
+#if defined(CBC) && (CBC == 1)
 static MunitResult test_cbc(const MunitParameter params[], void* data)
 {
   struct AES_ctx ctx;
@@ -54,6 +69,7 @@ static MunitResult test_cbc(const MunitParameter params[], void* data)
   (void) params;
   (void) data;
 
+  test_initialize_sbox();
   AES_init_ctx_iv(&ctx, TEST_KEY, nist_iv);
   memcpy(buffer, nist_plaintext, sizeof(buffer));
   AES_CBC_encrypt_buffer(&ctx, buffer, sizeof(buffer));
@@ -65,7 +81,9 @@ static MunitResult test_cbc(const MunitParameter params[], void* data)
 
   return MUNIT_OK;
 }
+#endif
 
+#if defined(CTR) && (CTR == 1)
 static MunitResult test_ctr(const MunitParameter params[], void* data)
 {
   struct AES_ctx ctx;
@@ -74,6 +92,7 @@ static MunitResult test_ctr(const MunitParameter params[], void* data)
   (void) params;
   (void) data;
 
+  test_initialize_sbox();
   AES_init_ctx_iv(&ctx, TEST_KEY, nist_ctr_iv);
   memcpy(buffer, nist_plaintext, sizeof(buffer));
   AES_CTR_xcrypt_buffer(&ctx, buffer, sizeof(buffer));
@@ -85,11 +104,18 @@ static MunitResult test_ctr(const MunitParameter params[], void* data)
 
   return MUNIT_OK;
 }
+#endif
 
 static MunitTest test_suite_tests[] = {
+#if defined(ECB) && (ECB == 1)
   { "/ecb", test_ecb, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+#endif
+#if defined(CBC) && (CBC == 1)
   { "/cbc", test_cbc, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+#endif
+#if defined(CTR) && (CTR == 1)
   { "/ctr", test_ctr, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+#endif
   { NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL }
 };
 

@@ -25,3 +25,15 @@ jobs:
       run: make
     - name: make test
       run: make test
+    - name: install CMake
+      run: |
+        if ! command -v cmake >/dev/null 2>&1; then
+          apt-get update
+          apt-get install -y cmake
+        fi
+    - name: configure CMake
+      run: cmake -S . -B build
+    - name: build CMake tests
+      run: cmake --build build --parallel 4
+    - name: run CTest
+      run: ctest --test-dir build --output-on-failure

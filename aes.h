@@ -23,10 +23,38 @@
   #define CTR 1
 #endif
 
+/*
+ * S-box implementation modes:
+ *   AES_SBOX_MODE_CONSTANT_TIME - fixed-size masked scan (default)
+ *   AES_SBOX_MODE_RUNTIME       - generated in RAM, then masked scan
+ *   AES_SBOX_MODE_FAST          - direct lookup; not constant-time
+ */
+#define AES_SBOX_MODE_CONSTANT_TIME 1
+#define AES_SBOX_MODE_RUNTIME       2
+#define AES_SBOX_MODE_FAST          3
 
-#define AES128 1
-//#define AES192 1
-//#define AES256 1
+#ifndef AES_SBOX_MODE
+  #define AES_SBOX_MODE AES_SBOX_MODE_CONSTANT_TIME
+#endif
+
+#if (AES_SBOX_MODE < AES_SBOX_MODE_CONSTANT_TIME) || \
+    (AES_SBOX_MODE > AES_SBOX_MODE_FAST)
+  #error "AES_SBOX_MODE must be AES_SBOX_MODE_CONSTANT_TIME, AES_SBOX_MODE_RUNTIME, or AES_SBOX_MODE_FAST"
+#endif
+
+/* 0 keeps byte-safe operations; 1 enables portable native-width helpers. */
+#ifndef AES_WIDE_OPS
+  #define AES_WIDE_OPS 0
+#endif
+
+#if (AES_WIDE_OPS != 0) && (AES_WIDE_OPS != 1)
+  #error "AES_WIDE_OPS must be 0 or 1"
+#endif
+
+/* AES128 is the default when no key size is selected by the build. */
+#if !defined(AES128) && !defined(AES192) && !defined(AES256)
+  #define AES128 1
+#endif
 
 #define AES_BLOCKLEN 16 // Block length in bytes - AES is 128b block only
 
@@ -50,6 +78,10 @@ struct AES_ctx
 };
 
 void AES_init_ctx(struct AES_ctx* ctx, const uint8_t* key);
+#if AES_SBOX_MODE == AES_SBOX_MODE_RUNTIME
+/* Must be called before AES_init_ctx(), AES_init_ctx_iv(), or encryption. */
+void AES_init_sbox(void);
+#endif
 #if (defined(CBC) && (CBC == 1)) || (defined(CTR) && (CTR == 1))
 void AES_init_ctx_iv(struct AES_ctx* ctx, const uint8_t* key, const uint8_t* iv);
 void AES_ctx_set_iv(struct AES_ctx* ctx, const uint8_t* iv);

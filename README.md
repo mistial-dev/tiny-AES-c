@@ -1,4 +1,4 @@
-![CI](https://github.com/kokke/tiny-AES-c/actions/workflows/c-cpp.yml/badge.svg)
+![CI](https://github.com/mistial-dev/tiny-AES-C/actions/workflows/c-cpp.yml/badge.svg)
 ### Tiny AES in C
 
 This repository is a fork of [kokke/tiny-AES-c](https://github.com/kokke/tiny-AES-c).
@@ -6,7 +6,7 @@ Fork-specific changes are documented in [CHANGELOG.md](CHANGELOG.md).
 
 This is a small and portable implementation of the AES [ECB](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Electronic_Codebook_.28ECB.29), [CTR](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Counter_.28CTR.29) and [CBC](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Block_Chaining_.28CBC.29) encryption algorithms written in C.
 
-You can override the default key-size of 128 bit with 192 or 256 bit by defining the symbols AES192 or AES256 in [`aes.h`](https://github.com/kokke/tiny-AES-c/blob/master/aes.h).
+You can override the default key-size of 128 bit with 192 or 256 bit by defining the symbols AES192 or AES256 in [`aes.h`](aes.h).
 
 The API is very simple and looks like this (I am using C99 `<stdint.h>`-style annotated types):
 
@@ -35,44 +35,42 @@ Important notes:
  * This library is designed for small code size and simplicity, intended for cases where small binary size, low memory footprint and portability is more important than high performance. If speed is a concern, you can try more complex libraries, e.g. [Mbed TLS](https://tls.mbed.org/), [OpenSSL](https://www.openssl.org/) etc.
  * This fork uses fixed-size masked scans for the AES S-boxes instead of secret-indexed table lookups, reducing cache-timing leakage. Constant-time behavior still depends on the compiler and target platform.
 
-You can choose to use any or all of the modes-of-operations, by defining the symbols CBC, CTR or ECB in [`aes.h`](https://github.com/kokke/tiny-AES-c/blob/master/aes.h) (read the comments for clarification).
+You can choose to use any or all of the modes-of-operations, by defining the symbols CBC, CTR or ECB in [`aes.h`](aes.h) (read the comments for clarification).
 
-C++ users should `#include` [aes.hpp](https://github.com/kokke/tiny-AES-c/blob/master/aes.hpp) instead of [aes.h](https://github.com/kokke/tiny-AES-c/blob/master/aes.h)
+C++ users should `#include` [aes.hpp](aes.hpp) instead of [aes.h](aes.h).
 
 There is no built-in error checking or protection from out-of-bounds memory access errors as a result of malicious input.
 
-The module uses less than 200 bytes of RAM and 1-2K ROM when compiled for ARM, but YMMV depending on which modes are enabled.
-
-It is one of the smallest implementations in C I've seen yet, but do contact me if you know of something smaller (or have improvements to the code here). 
-
-I've successfully used the code on 64bit x86, 32bit ARM and 8 bit AVR platforms.
+Binary size and memory use depend on the compiler, target, enabled modes,
+key size, and build profile.
 
 
-GCC size output when only CTR mode is compiled for ARM:
+## Build-time profiles
 
-    $ arm-none-eabi-gcc -Os -DCBC=0 -DECB=0 -DCTR=1 -c aes.c
-    $ size aes.o
-       text    data     bss     dec     hex filename
-       1171       0       0    1171     493 aes.o
+The secure profile is the default and uses fixed-size masked S-box scans. The
+following named options are available in the Makefile:
 
-.. and when compiling for the THUMB instruction set, we end up well below 1K in code size.
+    make AES_SBOX_MODE=secure AES_WIDE_OPS=off
+    make AES_SBOX_MODE=runtime AES_WIDE_OPS=auto
+    make AES_SBOX_MODE=fast AES_WIDE_OPS=auto
 
-    $ arm-none-eabi-gcc -Os -mthumb -DCBC=0 -DECB=0 -DCTR=1 -c aes.c
-    $ size aes.o
-       text    data     bss     dec     hex filename
-        903       0       0     903     387 aes.o
+The equivalent CMake options are `TINY_AES_SBOX_MODE=secure|runtime|fast` and
+`TINY_AES_WIDE_OPS=ON|OFF`.
 
+The `runtime` S-box profile generates the tables in a fixed 256-byte RAM
+allocation. Call `AES_init_sbox()` once before initializing an AES context.
+Lookups still scan all entries and retain the constant-time memory-access
+pattern; this profile trades ROM for RAM and startup work without using heap
+allocation.
 
-I am using the Free Software Foundation, ARM GCC compiler:
+The `fast` profile uses direct table indexing and is not constant-time. Use it
+only when cache-timing leakage is outside the threat model. Wide operations
+use alignment-safe `memcpy` temporaries and automatically fall back to byte
+operations on targets where a wider native type is not appropriate.
 
-    $ arm-none-eabi-gcc --version
-    arm-none-eabi-gcc (4.8.4-1+11-1) 4.8.4 20141219 (release)
-    Copyright (C) 2013 Free Software Foundation, Inc.
-    This is free software; see the source for copying conditions.  There is NO
-    warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+Measure the exact configuration with:
 
-
-
+    make size AES_SBOX_MODE=secure AES_WIDE_OPS=off
 
 This implementation is verified against the data in:
 
@@ -82,7 +80,7 @@ The other appendices in the document are valuable for implementation details on 
 
 ## Testing
 
-Unit tests use the vendored [µunit (munit)](https://nemequ.github.io/munit/) framework and cover the NIST SP 800-38A Appendix F ECB, CBC, and CTR vectors for AES-128, AES-192, and AES-256.
+Unit tests use the vendored [µunit (munit)](https://nemequ.github.io/munit/) framework and exercise all 126 compile-time combinations of AES-128/192/256, every non-empty ECB/CBC/CTR mode combination, all S-box profiles, and both wide-operation settings. Each enabled mode is checked against NIST SP 800-38A Appendix F vectors.
 
 Run the Makefile test suite with:
 
@@ -95,7 +93,8 @@ Or use CMake and CTest on platforms supported by CMake:
     ctest --test-dir build --output-on-failure
 
 
-A heartfelt thank-you to [all the nice people](https://github.com/kokke/tiny-AES-c/graphs/contributors) out there who have contributed to this project.
+A heartfelt thank-you to [all the nice people](https://github.com/kokke/tiny-AES-c/graphs/contributors) out there who have contributed to the upstream project.
 
 
-All material in this repository is in the public domain.
+The AES implementation remains in the public domain. The vendored µunit
+framework is distributed under its MIT license.
