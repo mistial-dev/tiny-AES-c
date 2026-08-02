@@ -279,4 +279,25 @@ int AES_EAX_decrypt(const uint8_t* key, const uint8_t* nonce,
 
 #endif
 
+#if defined(EAX_PRIME) && (EAX_PRIME == 1)
+
+#define AES_EAX_PRIME_SUCCESS 0
+#define AES_EAX_PRIME_ERROR   (-1)
+#define AES_EAX_PRIME_TAG_LEN 4
+
+/* ANSI C12.22 EAX' authenticates cleartext and optionally encrypts a
+ * plaintext. The four-byte tag is fixed by C12.22. Authentication failure
+ * leaves plaintext output untouched. */
+int AES_EAX_PRIME_encrypt(const uint8_t* key, const uint8_t* cleartext,
+                          size_t cleartext_len, const uint8_t* plaintext,
+                          size_t plaintext_len, uint8_t* ciphertext,
+                          uint8_t tag[AES_EAX_PRIME_TAG_LEN]);
+int AES_EAX_PRIME_decrypt(const uint8_t* key, const uint8_t* cleartext,
+                          size_t cleartext_len, const uint8_t* ciphertext,
+                          size_t ciphertext_len,
+                          const uint8_t tag[AES_EAX_PRIME_TAG_LEN],
+                          uint8_t* plaintext);
+
+#endif
+
 #endif // _AES_H_

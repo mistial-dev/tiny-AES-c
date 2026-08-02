@@ -13,3 +13,18 @@ placed in the **public domain** and is free and unencumbered for all uses.
 
 These files are test inputs only; they are not linked into embedded library
 builds.
+
+`eax_prime_worked.json` contains twelve Wycheproof-style positive worked
+vectors generated independently with Python's `cryptography` AES backend and
+the C12.22 Annex I algorithm. The C implementation checks ciphertext and tag
+against these values as a cross-implementation regression set.
+
+Run `python3 verify_eax_prime.py` to verify the same corpus with OpenSSL's
+AES-128 implementation. This is a separate third-party cross-check from the
+Python implementation used to generate the values.
+
+The EAX' vector in `c12-22-eax-prime.txt` is transcribed from ANSI C12.22-2008,
+Example 9 and Annex I.4. It is included for interoperability testing only;
+the source standard and its permissions govern the reproduced reference
+material. The local source PDF used for the transcription was
+`/Users/mistial/Downloads/C12.22 Standard.pdf`.

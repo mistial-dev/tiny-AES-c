@@ -8,6 +8,9 @@ SPDX-License-Identifier: Unlicense
 
 ## Unreleased
 
+- Added opt-in ANSI C12.22 EAX' support with Annex I.4 interoperability
+  coverage, twelve boundary-focused worked vectors, and an OpenSSL-based
+  independent cross-check.
 - Added opt-in, heap-free AES-EAX authenticated encryption with the Appendix G
   EAX vectors and all 240 Wycheproof AES-EAX cases, including authentication
   failure, in-place, and API validation tests. Vendored vector attribution and

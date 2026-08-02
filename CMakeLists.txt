@@ -17,6 +17,7 @@ option(TINY_AES_ENABLE_OFB "Enable OFB mode in the main library" OFF)
 option(TINY_AES_ENABLE_GCM "Enable GCM mode in the main library" OFF)
 option(TINY_AES_ENABLE_CCM "Enable CCM mode in the main library" OFF)
 option(TINY_AES_ENABLE_EAX "Enable EAX mode in the main library" OFF)
+option(TINY_AES_ENABLE_EAX_PRIME "Enable ANSI C12.22 EAX' mode in the main library" OFF)
 option(TINY_AES_CAVP "Run the complete AES CAVP response corpora" OFF)
 option(TINY_AES_WIDE_OPS "Enable portable native-width block helpers" OFF)
 set(TINY_AES_SBOX_MODE "secure" CACHE STRING "S-box mode: secure, runtime, or fast")
@@ -95,6 +96,11 @@ if(TINY_AES_ENABLE_EAX)
 else()
     set(TINY_AES_EAX 0)
 endif()
+if(TINY_AES_ENABLE_EAX_PRIME)
+    set(TINY_AES_EAX_PRIME 1)
+else()
+    set(TINY_AES_EAX_PRIME 0)
+endif()
 if(TINY_AES_CAVP)
     set(TINY_AES_CAVP_DEFINITION 1)
 else()
@@ -106,6 +112,7 @@ tiny_aes_mode_definitions(tiny_aes_library_definitions
     ${TINY_AES_EAX})
 list(APPEND tiny_aes_library_definitions GCM=${TINY_AES_GCM}
     CCM=${TINY_AES_CCM}
+    EAX_PRIME=${TINY_AES_EAX_PRIME}
     ${TINY_AES_GCM_GHASH_DEFINITION})
 
 add_library(tiny-aes STATIC aes.c)
@@ -129,6 +136,7 @@ if(TINY_AES_BUILD_TESTS)
         set(ctr 0)
         set(ofb 0)
         set(eax_mode ${eax})
+        set(eax_prime_mode 0)
         if(mode STREQUAL "ecb")
             set(ecb 1)
         elseif(mode STREQUAL "cbc")
@@ -145,6 +153,8 @@ if(TINY_AES_BUILD_TESTS)
             set(eax_mode 1)
         elseif(mode STREQUAL "eax")
             set(eax_mode 1)
+        elseif(mode STREQUAL "eax-prime")
+            set(eax_prime_mode 1)
         elseif(NOT mode STREQUAL "ccm" AND NOT mode STREQUAL "gcm")
             message(FATAL_ERROR "Unknown AES test mode: ${mode}")
         endif()
@@ -170,11 +180,11 @@ if(TINY_AES_BUILD_TESTS)
             set(hardware_definition)
         endif()
 
-        set(test_name "${key}-${mode}-gcm${gcm}-ccm${ccm}-eax${eax_mode}-ghash${ghash_index}-${sbox_mode}-wide${wide}-cavp${cavp}")
+        set(test_name "${key}-${mode}-gcm${gcm}-ccm${ccm}-eax${eax_mode}-eaxprime${eax_prime_mode}-ghash${ghash_index}-${sbox_mode}-wide${wide}-cavp${cavp}")
         add_library(test_core_${test_name} OBJECT aes.c test.c cavp.c eax_test.c)
         target_include_directories(test_core_${test_name} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
         target_compile_definitions(test_core_${test_name} PRIVATE
-            CBC=${cbc} ECB=${ecb} CTR=${ctr} OFB=${ofb} GCM=${gcm} CCM=${ccm} EAX=${eax_mode}
+            CBC=${cbc} ECB=${ecb} CTR=${ctr} OFB=${ofb} GCM=${gcm} CCM=${ccm} EAX=${eax_mode} EAX_PRIME=${eax_prime_mode}
             AES_CAVP=${cavp}
             AES_GCM_GHASH_MODE=${ghash_index}
             ${key_definition} ${sbox_definition} AES_WIDE_OPS=${wide}
@@ -231,6 +241,12 @@ if(TINY_AES_BUILD_TESTS)
         foreach(sbox_mode IN ITEMS secure runtime fast)
             add_tiny_aes_test(${key} eax 0 0 1 auto ${sbox_mode} 0 0)
         endforeach()
+
+        if(key STREQUAL "128")
+            foreach(sbox_mode IN ITEMS secure runtime fast)
+                add_tiny_aes_test(${key} eax-prime 0 0 0 auto ${sbox_mode} 0 0)
+            endforeach()
+        endif()
 
         if(NOT TINY_AES_CAVP)
             add_tiny_aes_test(${key} all 1 1 1 auto secure 1 0)

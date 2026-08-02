@@ -11,7 +11,7 @@ SPDX-License-Identifier: Unlicense
 This repository is a fork of [kokke/tiny-AES-c](https://github.com/kokke/tiny-AES-c).
 Fork-specific changes are documented in [CHANGELOG.md](CHANGELOG.md).
 
-This is a small and portable implementation of the AES [ECB](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Electronic_Codebook_.28ECB.29), [CTR](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Counter_.28CTR.29), [CBC](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Block_Chaining_.28CBC.29), [OFB](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Output_feedback_.28OFB.29), and opt-in authenticated [CCM](https://en.wikipedia.org/wiki/CCM_mode), [EAX](https://eprint.iacr.org/2003/069), and [GCM](https://en.wikipedia.org/wiki/Galois/Counter_Mode) modes written in C.
+This is a small and portable implementation of the AES [ECB](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Electronic_Codebook_.28ECB.29), [CTR](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Counter_.28CTR.29), [CBC](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Block_Chaining_.28CBC.29), [OFB](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Output_feedback_.28OFB.29), and opt-in authenticated [CCM](https://en.wikipedia.org/wiki/CCM_mode), [EAX](https://eprint.iacr.org/2003/069), ANSI C12.22 EAX', and [GCM](https://en.wikipedia.org/wiki/Galois/Counter_Mode) modes written in C.
 
 You can override the default key-size of 128 bit with 192 or 256 bit by defining the symbols AES192 or AES256 in [`aes.h`](aes.h).
 
@@ -67,7 +67,7 @@ Important notes:
  * This library is designed for small code size and simplicity, intended for cases where small binary size, low memory footprint and portability is more important than high performance. If speed is a concern, you can try more complex libraries, e.g. [Mbed TLS](https://tls.mbed.org/), [OpenSSL](https://www.openssl.org/) etc.
  * This fork uses fixed-size masked scans for the AES S-boxes instead of secret-indexed table lookups, reducing cache-timing leakage. Constant-time behavior still depends on the compiler and target platform.
 
-The default build enables only CTR. CBC, ECB, OFB, CCM, EAX, and GCM are opt-in so unused modes do not add their code or context state. Enable modes with `AES_ENABLE_CBC`, `AES_ENABLE_ECB`, `AES_ENABLE_OFB`, `AES_ENABLE_CCM`, `AES_ENABLE_EAX`, and `AES_ENABLE_GCM` in Make, or the corresponding `TINY_AES_ENABLE_*` CMake options. Direct users can define the `CBC`, `ECB`, `OFB`, `CCM`, `EAX`, and `GCM` symbols to `1` before including [`aes.h`](aes.h).
+The default build enables only CTR. CBC, ECB, OFB, CCM, EAX, EAX', and GCM are opt-in so unused modes do not add their code or context state. Enable modes with `AES_ENABLE_CBC`, `AES_ENABLE_ECB`, `AES_ENABLE_OFB`, `AES_ENABLE_CCM`, `AES_ENABLE_EAX`, `AES_ENABLE_EAX_PRIME`, and `AES_ENABLE_GCM` in Make, or the corresponding `TINY_AES_ENABLE_*` CMake options. Direct users can define the `CBC`, `ECB`, `OFB`, `CCM`, `EAX`, `EAX_PRIME`, and `GCM` symbols to `1` before including [`aes.h`](aes.h).
 
 For example, enable OFB without the other optional modes:
 
@@ -90,6 +90,13 @@ AEAD interface with arbitrary nonce and AAD lengths and tags from 0–16 bytes.
 Nonce uniqueness remains the caller's responsibility. Decryption authenticates
 before writing plaintext and leaves the output untouched on authentication
 failure. EAX is compiled out unless explicitly enabled.
+
+ANSI C12.22 EAX' is enabled with `make AES_ENABLE_EAX_PRIME=1` or
+`cmake -S . -B build -DTINY_AES_ENABLE_EAX_PRIME=ON`. It authenticates
+cleartext, encrypts optional plaintext, and emits the fixed four-byte C12.22
+tag. Authentication uses constant-time comparison and failed decryption leaves
+the output untouched. The interoperability vector and source notes are in
+`test_vectors/eax/c12-22-eax-prime.txt`.
 
 OFB is a synchronous stream mode: encryption and decryption use the same
 function, do not require padding, and can process data in arbitrary chunks.
