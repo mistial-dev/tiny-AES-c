@@ -8,6 +8,41 @@ SPDX-License-Identifier: Unlicense
 
 ## Unreleased
 
+### BREAKING
+
+- Status codes are only `AES_OK` / `AES_ERR`. Per-mode `AES_*_SUCCESS` and
+  `AES_*_ERROR` macros are removed.
+- `AES_keyExpSize` is renamed to `AES_KEY_EXP_SIZE`.
+- Classical APIs renamed and now return `int`:
+  - `AES_CBC_encrypt_buffer` → `AES_CBC_encrypt`
+  - `AES_CBC_decrypt_buffer` → `AES_CBC_decrypt`
+  - `AES_CTR_xcrypt_buffer` → `AES_CTR_crypt`
+  - `AES_OFB_xcrypt_buffer` → `AES_OFB_crypt`
+- CBC rejects lengths that are not multiples of 16 with `AES_ERR`.
+- CTR returns `AES_ERR` if a request would wrap the 128-bit counter (buffer and
+  IV left unchanged).
+- EAX rejects tags shorter than `AES_EAX_MIN_TAG_LEN` (default 8) and zero-length
+  tags.
+- GCM rejects tags shorter than `AES_GCM_MIN_TAG_LEN` (default 8). Four-byte tags
+  require `AES_GCM_ALLOW_TAG4=1` (set automatically for CAVP builds).
+- No compatibility aliases are provided; update call sites.
+
+### Added
+
+- `AES_secure_zero` and `AES_ctx_clear`; `AES_ZEROIZE` (default on) wipes stack
+  secrets in one-shot CCM/EAX/EAX'/GCM paths.
+- `AES_STRICT` optional NULL checks on classical buffer APIs.
+- One-shot `AES_GCM_encrypt` / `AES_GCM_decrypt` (auth-before-release decrypt).
+- `AES_TINY` compile-time rejection of table4/fast-table GHASH.
+- `AES_GCM_SHARED_TABLE` for a single BSS 8 KiB GHASH table.
+- README rewritten for MCU use: gating, sizeof table, RTOS notes, examples, and
+  residual risks.
+
+### Changed
+
+- CCM/EAX/EAX' one-shots use packed stack workspaces for predictable depth.
+- Professional documentation tone; accurate default-mode gating.
+
 - Added opt-in ANSI C12.22 EAX' support with Annex I.4 interoperability
   coverage, twelve boundary-focused worked vectors, and an OpenSSL-based
   independent cross-check.

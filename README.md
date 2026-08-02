@@ -5,260 +5,293 @@ SPDX-License-Identifier: Unlicense
 -->
 
 [![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](unlicense.txt)
-[![Build Status](https://img.shields.io/badge/tests-100%25%20passing-brightgreen.svg)](https://github.com/mistial-dev/tiny-AES-c/actions)
-### Tiny AES in C
+[![Build Status](https://img.shields.io/badge/tests-passing-brightgreen.svg)](https://github.com/mistial-dev/tiny-AES-c/actions)
 
-This repository is a fork of [kokke/tiny-AES-c](https://github.com/kokke/tiny-AES-c).
-Fork-specific changes are documented in [CHANGELOG.md](CHANGELOG.md).
+# Tiny AES in C
 
-This is a small and portable implementation of the AES [ECB](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Electronic_Codebook_.28ECB.29), [CTR](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Counter_.28CTR.29), [CBC](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Block_Chaining_.28CBC.29), [OFB](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Output_feedback_.28OFB.29), and opt-in authenticated [CCM](https://en.wikipedia.org/wiki/CCM_mode), [EAX](https://eprint.iacr.org/2003/069), ANSI C12.22 EAX', and [GCM](https://en.wikipedia.org/wiki/Galois/Counter_Mode) modes written in C.
+Heap-free AES for constrained targets (AVR-class MCUs and similar). This
+repository is a fork of [kokke/tiny-AES-c](https://github.com/kokke/tiny-AES-c).
+Fork-specific changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
-You can override the default key-size of 128 bit with 192 or 256 bit by defining the symbols AES192 or AES256 in [`aes.h`](aes.h).
+## Overview
 
-The API is very simple and looks like this (I am using C99 `<stdint.h>`-style annotated types):
+Portable C99 implementation of AES-128/192/256 with compile-time mode
+selection. **The default build enables CTR only.** All other modes are opt-in
+so unused algorithms do not contribute code or context fields:
 
-```C
-/* Initialize context calling one of: */
-void AES_init_ctx(struct AES_ctx* ctx, const uint8_t* key);
-void AES_init_ctx_iv(struct AES_ctx* ctx, const uint8_t* key, const uint8_t* iv);
+| Mode | Default | Role |
+|------|---------|------|
+| **CTR** | on | Confidentiality stream mode |
+| ECB | off | Single-block; insecure for most uses |
+| CBC | off | Block chaining; no padding provided |
+| OFB | off | Stream mode; confidentiality only |
+| CCM | off | One-shot AEAD (packet mode) |
+| EAX | off | One-shot AEAD |
+| EAX′ | off | ANSI C12.22 authenticated encryption |
+| GCM | off | Streaming AEAD plus one-shot helpers |
 
-/* ... or reset IV at random point: */
-void AES_ctx_set_iv(struct AES_ctx* ctx, const uint8_t* iv);
+Key size is fixed at compile time: define `AES192` or `AES256`, otherwise
+AES-128 is selected.
 
-/* Then start encrypting and decrypting with the functions below: */
-void AES_ECB_encrypt(const struct AES_ctx* ctx, uint8_t* buf);
-void AES_ECB_decrypt(const struct AES_ctx* ctx, uint8_t* buf);
+Design priorities: small binary size, low RAM, no heap, predictable stack, and
+simple call sites suitable for bare-metal and RTOS firmware. This is not a
+high-throughput server library.
 
-void AES_CBC_encrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length);
-void AES_CBC_decrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length);
+## Status codes
 
-/* Same function for encrypting as for decrypting in CTR mode */
-void AES_CTR_xcrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length);
+Fallible APIs return `AES_OK` (0) or `AES_ERR` (−1).
 
-/* Same function for encrypting as for decrypting in OFB mode */
-void AES_OFB_xcrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length);
+## Configuration
 
-/* Enable CCM=1 for one-shot authenticated encryption. */
-int AES_CCM_encrypt(const uint8_t* key, const uint8_t* nonce,
-                    size_t nonce_len, const uint8_t* aad, size_t aad_len,
-                    const uint8_t* plaintext, size_t plaintext_len,
-                    uint8_t* ciphertext, uint8_t* tag, size_t tag_len);
+### Modes (Make / CMake / `-D`)
 
-/* Enable EAX=1 for one-shot authenticated encryption. */
-int AES_EAX_encrypt(const uint8_t* key, const uint8_t* nonce,
-                    size_t nonce_len, const uint8_t* aad, size_t aad_len,
-                    const uint8_t* plaintext, size_t plaintext_len,
-                    uint8_t* ciphertext, uint8_t* tag, size_t tag_len);
-
-/* Enable GCM with GCM=1 and use this streaming API. */
-int AES_GCM_init(struct AES_GCM_ctx* ctx, const uint8_t* key,
-                 const uint8_t* iv, size_t iv_len);
-int AES_GCM_aad_update(struct AES_GCM_ctx* ctx, const uint8_t* aad, size_t length);
-int AES_GCM_encrypt_update(struct AES_GCM_ctx* ctx, uint8_t* buf, size_t length);
-int AES_GCM_decrypt_update(struct AES_GCM_ctx* ctx, uint8_t* buf, size_t length);
-int AES_GCM_encrypt_finish(struct AES_GCM_ctx* ctx, uint8_t* tag, size_t tag_len);
-int AES_GCM_decrypt_finish(struct AES_GCM_ctx* ctx, const uint8_t* tag, size_t tag_len);
+```text
+make AES_ENABLE_CBC=1 AES_ENABLE_GCM=1
+cmake -S . -B build -DTINY_AES_ENABLE_CBC=ON -DTINY_AES_ENABLE_GCM=ON
 ```
 
-Important notes: 
- * No padding is provided so for CBC and ECB all buffers should be multiples of 16 bytes. For padding [PKCS7](https://en.wikipedia.org/wiki/Padding_(cryptography)#PKCS7) is recommendable.
- * OFB and CTR accept arbitrary buffer lengths and preserve their stream position across calls. OFB requires a unique IV for every message under the same key and provides confidentiality only; use CCM, GCM, or another authenticator when integrity is required.
- * ECB mode is considered unsafe for most uses and is not implemented in streaming mode. If you need this mode, call the function for every block of 16 bytes you need encrypted. See [wikipedia's article on ECB](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Electronic_Codebook_(ECB)) for more details.
- * This library is designed for small code size and simplicity, intended for cases where small binary size, low memory footprint and portability is more important than high performance. If speed is a concern, you can try more complex libraries, e.g. [Mbed TLS](https://tls.mbed.org/), [OpenSSL](https://www.openssl.org/) etc.
- * This fork uses fixed-size masked scans for the AES S-boxes instead of secret-indexed table lookups, reducing cache-timing leakage. Constant-time behavior still depends on the compiler and target platform.
+Direct inclusion: define `CBC`, `ECB`, `CTR`, `OFB`, `GCM`, `CCM`, `EAX`,
+and/or `EAX_PRIME` to `1` before including `aes.h`.
 
-The default build enables only CTR. CBC, ECB, OFB, CCM, EAX, EAX', and GCM are opt-in so unused modes do not add their code or context state. Enable modes with `AES_ENABLE_CBC`, `AES_ENABLE_ECB`, `AES_ENABLE_OFB`, `AES_ENABLE_CCM`, `AES_ENABLE_EAX`, `AES_ENABLE_EAX_PRIME`, and `AES_ENABLE_GCM` in Make, or the corresponding `TINY_AES_ENABLE_*` CMake options. Direct users can define the `CBC`, `ECB`, `OFB`, `CCM`, `EAX`, `EAX_PRIME`, and `GCM` symbols to `1` before including [`aes.h`](aes.h).
+### Security and size profiles
 
-For example, enable OFB without the other optional modes:
+| Macro | Default | Purpose |
+|-------|---------|---------|
+| `AES_SBOX_MODE` | constant-time scan | `secure` / `runtime` / `fast` (Make names) |
+| `AES_WIDE_OPS` | 0 | Portable wider block helpers when 1 |
+| `AES_ZEROIZE` | **1** | Wipe stack secrets in one-shot paths |
+| `AES_STRICT` | 0 | NULL checks on classical buffer APIs |
+| `AES_TINY` | 0 | `#error` if GHASH is table4/fast-table |
+| `AES_EAX_MIN_TAG_LEN` | 8 | Minimum EAX tag length |
+| `AES_GCM_MIN_TAG_LEN` | 8 | Minimum GCM tag length |
+| `AES_GCM_ALLOW_TAG4` | 0 | Allow 4-byte GCM tags (CAVP) |
+| `AES_GCM_SHARED_TABLE` | 0 | One shared 8 KiB GHASH table (BSS) |
+| `AES_GCM_GHASH_MODE` | auto | bitwise / wide / table4 / fast-table / hardware |
 
-    make AES_ENABLE_OFB=1
-    cmake -S . -B build -DTINY_AES_ENABLE_OFB=ON
+Make examples:
 
-CCM is enabled independently with `make AES_ENABLE_CCM=1` or
-`cmake -S . -B build -DTINY_AES_ENABLE_CCM=ON`. It is a packet-oriented,
-one-shot mode: the nonce, AAD, and payload lengths are supplied up front.
-Nonces must be 7–13 bytes and unique for the key; authentication tags must be
-even-sized values from 4–16 bytes. CCM does not provide streaming semantics.
-Encryption and decryption support in-place buffers. Decryption wipes the
-plaintext output on authentication failure, and callers must still treat a
-failure as rejection and must not use the output. CCM is compiled out unless
-explicitly enabled.
+```text
+make AES_SBOX_MODE=secure AES_WIDE_OPS=off AES_ZEROIZE=1
+make AES_ENABLE_GCM=1 AES_TINY=1 AES_GCM_GHASH_MODE=bitwise
+make AES_ENABLE_GCM=1 AES_GCM_GHASH_MODE=table4 AES_GCM_SHARED_TABLE=1
+```
 
-EAX is enabled with `make AES_ENABLE_EAX=1` or
-`cmake -S . -B build -DTINY_AES_ENABLE_EAX=ON`. It is a heap-free, one-shot
-AEAD interface with arbitrary nonce and AAD lengths and tags from 0–16 bytes.
-Nonce uniqueness remains the caller's responsibility. Decryption authenticates
-before writing plaintext and leaves the output untouched on authentication
-failure. EAX is compiled out unless explicitly enabled.
+## Memory footprint
 
-ANSI C12.22 EAX' is enabled with `make AES_ENABLE_EAX_PRIME=1` or
-`cmake -S . -B build -DTINY_AES_ENABLE_EAX_PRIME=ON`. It authenticates
-cleartext, encrypts optional plaintext, and emits the fixed four-byte C12.22
-tag. Authentication uses constant-time comparison and failed decryption leaves
-the output untouched. The interoperability vector and source notes are in
-`test_vectors/eax/c12-22-eax-prime.txt`.
+Sizes measured with AES-128 on a 64-bit host (`sizeof`). On 8/16-bit targets,
+structure layout may differ slightly; measure with your toolchain.
 
-OFB is a synchronous stream mode: encryption and decryption use the same
-function, do not require padding, and can process data in arbitrary chunks.
-The IV is not secret, but it must never repeat with the same key. OFB does not
-authenticate ciphertext or protect against replay.
+| Configuration | `sizeof(AES_ctx)` | `sizeof(AES_GCM_ctx)` |
+|---------------|-------------------|------------------------|
+| CTR only | 192 | — |
+| No IV modes (key schedule only) | 176 | — |
+| GCM, auto/bitwise GHASH | 176 | **312** |
+| GCM, table4 (per-context table) | 176 | **~8504** |
+| GCM, table4 + `AES_GCM_SHARED_TABLE` | 176 | **312** (+ 8 KiB BSS) |
 
-C++ users should `#include` [aes.hpp](aes.hpp) instead of [aes.h](aes.h).
+`AES_TINY=1` rejects table4/fast-table at compile time. Prefer bitwise/auto GHASH
+or a shared table on small devices.
 
-There is no built-in error checking or protection from out-of-bounds memory access errors as a result of malicious input.
+One-shot CCM/EAX/EAX′ keep a packed workspace on the stack (one `AES_ctx` plus
+a few 16-byte blocks). There are no VLAs and no recursive paths.
 
-Binary size and memory use depend on the compiler, target, enabled modes,
-key size, and build profile.
+ROM S-box: 256 bytes (plus inverse S-box when ECB/CBC/CAVP need decrypt).
+Runtime S-box mode uses 256 bytes of RAM instead of ROM for the forward table.
 
+## Public API (summary)
 
-## Build-time profiles
+```c
+void AES_secure_zero(void *p, size_t n);
+void AES_ctx_clear(struct AES_ctx *ctx);
 
-The secure profile is the default and uses fixed-size masked S-box scans. The
-following named options are available in the Makefile:
+void AES_init_ctx(struct AES_ctx *ctx, const uint8_t *key);
+void AES_init_ctx_iv(struct AES_ctx *ctx, const uint8_t *key, const uint8_t *iv);
+void AES_ctx_set_iv(struct AES_ctx *ctx, const uint8_t *iv);
 
-    make AES_SBOX_MODE=secure AES_WIDE_OPS=off
-    make AES_SBOX_MODE=runtime AES_WIDE_OPS=auto
-    make AES_SBOX_MODE=fast AES_WIDE_OPS=auto
+void AES_ECB_encrypt(const struct AES_ctx *ctx, uint8_t *buf); /* 16 bytes */
+void AES_ECB_decrypt(const struct AES_ctx *ctx, uint8_t *buf);
 
-The equivalent CMake options are `TINY_AES_SBOX_MODE=secure|runtime|fast` and
-`TINY_AES_WIDE_OPS=ON|OFF`.
+int  AES_CBC_encrypt(struct AES_ctx *ctx, uint8_t *buf, size_t len);
+int  AES_CBC_decrypt(struct AES_ctx *ctx, uint8_t *buf, size_t len);
 
-The `runtime` S-box profile generates the tables in a fixed 256-byte RAM
-allocation. Call `AES_init_sbox()` once before initializing an AES context.
-Lookups still scan all entries and retain the constant-time memory-access
-pattern; this profile trades ROM for RAM and startup work without using heap
-allocation.
+int  AES_CTR_crypt(struct AES_ctx *ctx, uint8_t *buf, size_t len);
+int  AES_OFB_crypt(struct AES_ctx *ctx, uint8_t *buf, size_t len);
 
-The `fast` profile uses direct table indexing and is not constant-time. Use it
-only when cache-timing leakage is outside the threat model. Wide operations
-use alignment-safe `memcpy` temporaries and automatically fall back to byte
-operations on targets where a wider native type is not appropriate.
+int  AES_GCM_init(struct AES_GCM_ctx *ctx, const uint8_t *key,
+                  const uint8_t *iv, size_t iv_len);
+int  AES_GCM_aad_update(...);
+int  AES_GCM_encrypt_update(...);
+int  AES_GCM_decrypt_update(...);
+int  AES_GCM_encrypt_finish(...);
+int  AES_GCM_decrypt_finish(...);
+int  AES_GCM_encrypt(...);  /* one-shot */
+int  AES_GCM_decrypt(...);  /* one-shot, auth-before-release */
+void AES_GCM_clear(struct AES_GCM_ctx *ctx);
 
-GCM is disabled by default. Enable it with `AES_ENABLE_GCM=1` in Make or
-`TINY_AES_ENABLE_GCM=ON` in CMake. Its default GHASH implementation is
-constant-time and uses fixed storage with no heap allocation. Full 16-byte
-payload blocks use a block-wise counter/GHASH path; short or split updates
-remain supported by the streaming path.
+int  AES_CCM_encrypt(...);
+int  AES_CCM_decrypt(...);
+int  AES_EAX_encrypt(...);
+int  AES_EAX_decrypt(...);
+int  AES_EAX_PRIME_encrypt(...);
+int  AES_EAX_PRIME_decrypt(...);
+```
 
-Select the GHASH implementation with `AES_GCM_GHASH_MODE` in Make or
-`TINY_AES_GCM_GHASH_MODE` in CMake:
+C++ projects should include `aes.hpp`.
 
-* `auto` (default) selects the portable constant-time implementation and uses
-  wide operations when enabled.
-* `bitwise` is the smallest constant-time implementation.
-* `wide` uses native 64-bit arithmetic where available.
-* `table4` uses an 8 KiB, fixed-layout constant-time lookup table.
-* `fast-table` uses the same table with direct indexing and is not
-  constant-time.
-* `hardware` calls the target-provided `AES_GCM_GHASH_HARDWARE_MULTIPLY`
-  macro, whose signature is `(result, input, hash_subkey)`.
+## Examples
 
-For example, an embedded Cortex-A53 build can connect the hook to an
-ARMv8-A PMULL implementation supplied by the platform crypto layer:
+### CTR (default mode)
 
-    /* target_ghash.h */
-    void cortex_a53_ghash_multiply(uint8_t result[16],
-                                   const uint8_t input[16],
-                                   const uint8_t hash_subkey[16]);
+```c
+struct AES_ctx ctx;
+uint8_t key[16] = { /* ... */ };
+uint8_t iv[16]  = { /* unique per message under this key */ };
+uint8_t buf[64];
 
-    /* build flags */
-    -DGCM=1 -DAES_GCM_GHASH_MODE=5 \
-      -DAES_GCM_GHASH_HARDWARE_MULTIPLY=cortex_a53_ghash_multiply
+AES_init_ctx_iv(&ctx, key, iv);
+if (AES_CTR_crypt(&ctx, buf, sizeof buf) != AES_OK) {
+    /* counter would wrap; choose a new IV */
+}
+AES_ctx_clear(&ctx);
+AES_secure_zero(key, sizeof key);
+```
 
-`cortex_a53_ghash_multiply` would normally be a small wrapper around the
-platform's ARMv8 PMULL routine, including the required GHASH byte order and
-reduction polynomial conversion. The wrapper must be tested against the
-portable profile and must preserve the constant-time properties required by
-the application. Other processors can use the same hook for a vendor AES/GCM
-peripheral or a native polynomial-multiply instruction; this library does not
-depend on a particular SDK or hardware API.
+### CBC
 
-For example:
+```c
+/* length must be a multiple of 16; padding is the caller's responsibility */
+if (AES_CBC_encrypt(&ctx, buf, len) != AES_OK) {
+    /* misaligned length or STRICT NULL failure */
+}
+```
 
-    make AES_ENABLE_GCM=1 AES_GCM_GHASH_MODE=wide AES_WIDE_OPS=auto
-    cmake -S . -B build -DTINY_AES_ENABLE_GCM=ON \
-      -DTINY_AES_GCM_GHASH_MODE=table4
+### OFB
 
-GCM has important application-level requirements. IVs/nonces must never be
-reused with the same key; use a construction that guarantees uniqueness.
-Each `AES_GCM_ctx` is single-direction: the first encrypt or decrypt update
-selects its direction, and an update using the opposite direction returns
-`AES_GCM_ERROR` without modifying the context or buffer. Reinitialize the
-context with `AES_GCM_init` before switching direction, and check every update
-return value.
-`AES_GCM_decrypt_update` decrypts in place before authentication completes, so
-callers must treat that buffer as unauthenticated and must not act on it until
-`AES_GCM_decrypt_finish` returns `AES_GCM_SUCCESS`. Check every API return
-value, use an authenticated tag of an appropriate length (16 bytes is the
-normal choice), and wipe contexts with `AES_GCM_clear` when they are no longer
-needed. GCM does not provide replay protection, key management, or nonce
-generation.
+```c
+AES_init_ctx_iv(&ctx, key, iv);
+AES_OFB_crypt(&ctx, chunk1, n1); /* stream position preserved */
+AES_OFB_crypt(&ctx, chunk2, n2);
+```
 
-Measure the exact configuration with:
+### ECB (avoid unless you must)
 
-    make size AES_SBOX_MODE=secure AES_WIDE_OPS=off
+```c
+AES_init_ctx(&ctx, key);
+AES_ECB_encrypt(&ctx, block16);
+```
 
-The host-only benchmark is opt-in and is not part of the unit-test matrix:
+### CCM (one-shot AEAD)
 
-    make benchmark AES_ENABLE_GCM=1 AES_GCM_GHASH_MODE=auto \
-      BENCHMARK_BYTES=16384 BENCHMARK_ITERATIONS=100
+```c
+uint8_t ct[64], tag[16];
+if (AES_CCM_encrypt(key, nonce, nonce_len, aad, aad_len,
+                    pt, pt_len, ct, tag, sizeof tag) != AES_OK)
+    return -1;
+/* On decrypt failure the library zeros the plaintext buffer. */
+```
 
-Targets can replace `AES_BENCHMARK_NOW()` and
-`AES_BENCHMARK_TICKS_PER_SECOND` with a cycle counter and its calibration.
-Benchmark results are meaningful only for the same compiler, optimization,
-processor, clock, S-box profile, GHASH profile, and payload shape.
+### EAX (one-shot AEAD)
 
-This implementation is verified against the data in:
+```c
+/* tag_len must be >= AES_EAX_MIN_TAG_LEN (default 8) and <= 16 */
+if (AES_EAX_decrypt(key, nonce, nlen, aad, alen, ct, clen, tag, tlen, pt)
+    != AES_OK) {
+    /* authentication failed; pt unchanged */
+}
+```
 
-[National Institute of Standards and Technology Special Publication 800-38A 2001 ED](http://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38a.pdf) Appendix F: Example Vectors for Modes of Operation of the AES.
+### GCM one-shot (preferred for whole messages)
 
-The other appendices in the document are valuable for implementation details on e.g. padding, generation of IVs and nonces in CTR-mode etc.
+```c
+uint8_t ct[64], tag[16];
+if (AES_GCM_encrypt(key, iv, iv_len, aad, aad_len, pt, pt_len,
+                    ct, tag, sizeof tag) != AES_OK)
+    return -1;
 
-For CAVP testing of ECB, CBC, OFB, CFB, and CTR modes from SP 800-38A,
-see the [NIST CAVP block ciphers page](https://csrc.nist.gov/projects/cryptographic-algorithm-validation-program/block-ciphers).
+if (AES_GCM_decrypt(key, iv, iv_len, aad, aad_len, ct, pt_len,
+                    tag, sizeof tag, pt) != AES_OK)
+    return -1; /* pt not released on failure (in-place is zeroed) */
+```
 
-The GCM implementation is checked against compact samples from the NIST CAVP
-AES-GCM vectors in [SharedAES-GCM](https://github.com/mko-x/SharedAES-GCM/tree/master/Sources/gcm_test_vectors).
-EAX is checked against the RFC-style Appendix G vectors from the EAX paper and
-all 240 AES-EAX cases in the vendored [Wycheproof](https://github.com/C2SP/wycheproof)
-JSON corpus. Attribution and license details are in
-[`test_vectors/eax/README.md`](test_vectors/eax/README.md).
+### GCM streaming
 
-## Testing
+```c
+struct AES_GCM_ctx gctx;
+AES_GCM_init(&gctx, key, iv, iv_len);
+AES_GCM_aad_update(&gctx, aad, aad_len);
+AES_GCM_encrypt_update(&gctx, buf, len);
+AES_GCM_encrypt_finish(&gctx, tag, tag_len);
+AES_GCM_clear(&gctx);
+```
 
-Unit tests use the vendored [µunit (munit)](https://nemequ.github.io/munit/) framework and cover each mode in isolation, all AES key sizes, S-box profiles, GHASH profiles, and focused API boundaries. One all-enabled build checks integration without multiplying every mode subset. CCM, EAX, and GCM are compiled out when disabled.
+**Streaming decrypt** writes candidate plaintext before the tag is checked.
+Do not act on that buffer until `AES_GCM_decrypt_finish` returns `AES_OK`.
+Prefer one-shot decrypt when the full ciphertext is available.
 
-Samples and focused tests run by default. Enable the complete vendored CAVP corpora with one switch:
+## RTOS and concurrency
 
-    make AES_CAVP=1 test
+- The library has **no internal locks**.
+- Do not use the same `AES_ctx` or `AES_GCM_ctx` concurrently from multiple
+  tasks or ISRs without external serialization.
+- Prefer one context per owner (task or connection).
+- `AES_init_sbox()` (runtime S-box profile) must run once before first use,
+  under single-threaded init.
+- With `AES_GCM_SHARED_TABLE=1`, serialize `AES_GCM_init` across tasks.
+- AES is usually too heavy for short ISRs; measure stack and latency on target.
+- Wipe keys with `AES_ctx_clear` / `AES_GCM_clear` / `AES_secure_zero` before
+  returning buffers to pools.
 
-Or with CMake:
+## Security notes
 
-    cmake -S . -B build -DTINY_AES_CAVP=ON
-    cmake --build build
-    ctest --test-dir build --output-on-failure --parallel 4
+- **Nonce/IV uniqueness** under a key is the caller's responsibility. Reuse
+  destroys security for CTR, OFB, CBC, CCM, EAX, and GCM.
+- **No padding** is provided. CBC/ECB lengths must be multiples of 16 bytes.
+- CBC rejects non-aligned lengths with `AES_ERR`. CTR rejects requests that
+  would wrap the 128-bit counter (buffer and IV left unchanged).
+- EAX tags must be at least 8 bytes by default. GCM tags default to at least 8
+  bytes; 16 is recommended. Four-byte GCM tags require `AES_GCM_ALLOW_TAG4`.
+- EAX′ uses the fixed four-byte C12.22 tag by specification.
+- Default S-box access uses fixed-size masked scans to reduce cache-timing
+  leakage. Constant-time behaviour still depends on the compiler and CPU.
+- `AES_SBOX_MODE_FAST` and GHASH `fast-table` are **not** constant-time.
+- ECB mode is insecure for almost all multi-block use cases.
 
-The CAVP run builds each mode independently and runs only that mode's corpus;
-it does not repeat the same corpus across every mode subset. Every key size,
-S-box profile, software GHASH profile, wide-operation path, and the hardware
-GHASH dispatch hook is exercised at least once. CTR remains covered by SP
-800-38A samples and focused tests because its counter-uniqueness requirement is
-configuration-dependent. These vectors provide informal validation, not a
-NIST certificate.
+## Residual risks (not fixed by this library)
 
-Run the Makefile test suite with:
+| Issue | Reason |
+|-------|--------|
+| True constant-time on all platforms | Compiler and microarchitecture dependent |
+| Nonce uniqueness | Application protocol |
+| Padding schemes | Out of scope |
+| Streaming GCM plaintext before tag | Inherent to incremental decrypt API |
+| Power / EM / residual cache leakage | Beyond portable C S-box scans |
+| Replay protection, KDF, RNG | Out of scope |
+| Undersized caller buffers | Caller must size outputs correctly |
+| Wipe vs aggressive LTO | Best-effort `volatile` stores |
 
-    make test
+## Build and test
 
-Or use CMake and CTest on platforms supported by CMake:
+```text
+make                    # aes.o with default CTR
+make size
+make test               # matrix of modes and profiles
+make AES_CAVP=1 test    # full vendored CAVP corpora
+make benchmark AES_ENABLE_GCM=1
+```
 
-    cmake -S . -B build
-    cmake --build build
-    ctest --test-dir build --output-on-failure
+CMake:
 
+```text
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
 
-A heartfelt thank-you to [all the nice people](https://github.com/kokke/tiny-AES-c/graphs/contributors) out there who have contributed to the upstream project.
+Unit tests use vendored µunit. Vectors include NIST SP 800-38A samples, CCM/GCM
+CAVP corpora (optional full run), EAX Appendix G / Wycheproof, and C12.22 EAX′
+notes under `test_vectors/`.
 
+## License
 
-The AES implementation remains in the public domain. The vendored µunit
-framework is distributed under its MIT license.
+AES implementation: public domain (Unlicense). Vendored µunit: MIT.
+Upstream contributors are credited in the original project history.
