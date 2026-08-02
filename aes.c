@@ -265,18 +265,21 @@ void AES_ctx_clear(struct AES_ctx* ctx)
  *   completely disjoint — OK
  *   partial overlap — not OK (AES_ERR)
  * Empty lengths are always OK.
+ *
+ * Uses uintptr_t subtraction (not relational pointer compares or
+ * pa+len) for C portability across unrelated objects / MCU ABIs.
  */
 static int aes_buffers_ok(const void* a, size_t a_len,
                           const void* b, size_t b_len)
 {
-  const uint8_t* pa = (const uint8_t*)a;
-  const uint8_t* pb = (const uint8_t*)b;
+  const uintptr_t pa = (uintptr_t)a;
+  const uintptr_t pb = (uintptr_t)b;
 
   if (a_len == 0 || b_len == 0 || pa == pb)
     return 1;
-  if (pa + a_len <= pb || pb + b_len <= pa)
-    return 1;
-  return 0;
+  if (pa < pb)
+    return a_len <= (size_t)(pb - pa);
+  return b_len <= (size_t)(pa - pb);
 }
 #endif
 
@@ -2471,8 +2474,20 @@ int AES_SIV_encrypt(const uint8_t* key,
                     uint8_t v[AES_SIV_V_LEN],
                     uint8_t* ciphertext)
 {
-  return siv_crypt(key, ad, ad_lens, ad_count, plaintext, plaintext_len,
-                   ciphertext, v, 0);
+  uint8_t local_v[AES_SIV_V_LEN];
+  int status;
+
+  if (v == NULL)
+    return AES_ERR;
+  /* Stage V so a caller-supplied v overlapping pt/ct cannot corrupt state. */
+  status = siv_crypt(key, ad, ad_lens, ad_count, plaintext, plaintext_len,
+                     ciphertext, local_v, 0);
+  if (status == AES_OK)
+    aes_copy_bytes(v, local_v, AES_SIV_V_LEN);
+#if AES_ZEROIZE
+  AES_secure_zero(local_v, sizeof(local_v));
+#endif
+  return status;
 }
 
 int AES_SIV_decrypt(const uint8_t* key,
@@ -2483,18 +2498,17 @@ int AES_SIV_decrypt(const uint8_t* key,
                     uint8_t* plaintext)
 {
   uint8_t local_v[AES_SIV_V_LEN];
+  int status;
 
   if (v == NULL)
     return AES_ERR;
   aes_copy_bytes(local_v, v, AES_SIV_V_LEN);
-  {
-    const int status = siv_crypt(key, ad, ad_lens, ad_count, ciphertext,
-                                 ciphertext_len, plaintext, local_v, 1);
+  status = siv_crypt(key, ad, ad_lens, ad_count, ciphertext, ciphertext_len,
+                     plaintext, local_v, 1);
 #if AES_ZEROIZE
-    AES_secure_zero(local_v, sizeof(local_v));
+  AES_secure_zero(local_v, sizeof(local_v));
 #endif
-    return status;
-  }
+  return status;
 }
 
 #endif /* SIV */

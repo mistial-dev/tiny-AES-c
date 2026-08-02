@@ -57,6 +57,31 @@ jobs:
     - name: Test
       run: ctest --test-dir build -C Release --output-on-failure --parallel 4
 
+    - name: Sparse Make configuration coverage
+      if: runner.os == 'Linux' && matrix.compiler == 'gcc'
+      run: |
+        set -e
+        mkdir -p .tiny-aes-tests
+        run_cfg() {
+          name="$1"; shift
+          common="$* -DCAVP_VECTOR_DIR=\"test_vectors/cavp\" -DEAX_VECTOR_FILE=\"test_vectors/eax/aes_eax_test.json\" -DSIV_VECTOR_FILE=\"test_vectors/siv/aead_aes_siv_cmac_test.json\""
+          ${CC:-gcc} -Wall -Wextra -O2 -std=c99 -I. $common -c aes.c -o .tiny-aes-tests/aes-cfg-$name.o
+          ${CC:-gcc} -Wall -Wextra -O2 -std=c99 -I. $common -c test.c -o .tiny-aes-tests/test-cfg-$name.o
+          ${CC:-gcc} -Wall -Wextra -O2 -std=c99 -I. $common -c cavp.c -o .tiny-aes-tests/cavp-cfg-$name.o
+          ${CC:-gcc} -Wall -Wextra -O2 -std=c99 -I. $common -c eax_test.c -o .tiny-aes-tests/eax-cfg-$name.o
+          ${CC:-gcc} -Wall -Wextra -O2 -std=c99 -I. $common -c siv_test.c -o .tiny-aes-tests/siv-cfg-$name.o
+          ${CC:-gcc} -Wall -Wextra -O2 -std=c99 -I. -c munit.c -o .tiny-aes-tests/munit.o
+          ${CC:-gcc} -o .tiny-aes-tests/test-cfg-$name \
+            .tiny-aes-tests/aes-cfg-$name.o .tiny-aes-tests/test-cfg-$name.o \
+            .tiny-aes-tests/cavp-cfg-$name.o .tiny-aes-tests/eax-cfg-$name.o \
+            .tiny-aes-tests/siv-cfg-$name.o .tiny-aes-tests/munit.o
+          .tiny-aes-tests/test-cfg-$name
+        }
+        run_cfg strict-ctr -DCBC=0 -DECB=0 -DCTR=1 -DOFB=0 -DGCM=0 -DCCM=0 -DEAX=0 -DEAX_PRIME=0 -DSIV=0 -DAES128=1 -DAES_STRICT=1 -DAES_ZEROIZE=1 -DAES_SBOX_MODE=1 -DAES_WIDE_OPS=0
+        run_cfg zeroize-off -DCBC=0 -DECB=0 -DCTR=1 -DOFB=0 -DGCM=0 -DCCM=0 -DEAX=0 -DEAX_PRIME=0 -DSIV=0 -DAES128=1 -DAES_STRICT=0 -DAES_ZEROIZE=0 -DAES_SBOX_MODE=1 -DAES_WIDE_OPS=0
+        run_cfg tiny-gcm -DCBC=0 -DECB=0 -DCTR=0 -DOFB=0 -DGCM=1 -DCCM=0 -DEAX=0 -DEAX_PRIME=0 -DSIV=0 -DAES128=1 -DAES_TINY=1 -DAES_GCM_GHASH_MODE=0 -DAES_SBOX_MODE=1 -DAES_WIDE_OPS=0
+        run_cfg multi-gcm -DCBC=0 -DECB=0 -DCTR=0 -DOFB=0 -DGCM=1 -DCCM=0 -DEAX=0 -DEAX_PRIME=0 -DSIV=0 -DAES128=1 -DAES_GCM_GHASH_MODE=0 -DAES_SBOX_MODE=1 -DAES_WIDE_OPS=0 -DGCM_MULTI_KEY_TEST=1
+
     - name: Cross-check EAX' worked vectors with OpenSSL
       if: runner.os == 'Linux'
       run: python3 test_vectors/eax/verify_eax_prime.py

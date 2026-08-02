@@ -57,7 +57,10 @@ SPDX-License-Identifier: Unlicense
 - One-shot GCM validates lengths and buffer overlap before any output copy.
 - README: CBC requires an **unpredictable** IV, not merely a unique one.
 - Sparse matrix coverage for `AES_STRICT=1`, `AES_ZEROIZE=0`, `AES_TINY=1`,
-  and multi-key GCM contexts.
+  and multi-key GCM contexts (Make local matrix + Linux GCC CI step).
+- Portable `aes_buffers_ok` via `uintptr_t` subtraction; SIV stages `v` so it
+  may alias other buffers; expanded SIV API tests and fixed Wycheproof case
+  counts (300 per key size).
 
 - Added opt-in ANSI C12.22 EAX' support with Annex I.4 interoperability
   coverage, twelve boundary-focused worked vectors, and an OpenSSL-based

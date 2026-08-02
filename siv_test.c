@@ -199,7 +199,13 @@ static MunitResult test_siv_wycheproof(const MunitParameter params[], void* data
   int in_group = 0;
   int have = 0;
   unsigned ran = 0;
+  unsigned ran_valid = 0;
+  unsigned ran_invalid = 0;
   unsigned failed = 0;
+  /* Vendored corpus: 300 cases per SIV key size (84 valid + 216 invalid). */
+  const unsigned expect_total = 300u;
+  const unsigned expect_valid = 84u;
+  const unsigned expect_invalid = 216u;
   const int want_bits = (int)(AES_SIV_KEYLEN * 8);
 
   (void) params;
@@ -303,36 +309,27 @@ static MunitResult test_siv_wycheproof(const MunitParameter params[], void* data
 
         ++ran;
         if (expect_ok)
+          ++ran_valid;
+        else
+          ++ran_invalid;
+
+        if (expect_ok)
         {
           if (AES_SIV_encrypt(key, ad, ad_lens, 2, msg, msg_len, out_v,
                               out_ct) != AES_OK ||
               memcmp(out_v, tag, AES_SIV_V_LEN) != 0 ||
               memcmp(out_ct, ct, ct_len) != 0)
-          {
             ++failed;
-            if (failed <= 8)
-              fprintf(stderr, "siv valid fail keybits=%d ivlen=%zu aadlen=%zu msglen=%zu\n",
-                      want_bits, iv_len, aad_len, msg_len);
-          }
           else if (AES_SIV_decrypt(key, ad, ad_lens, 2, tag, ct, ct_len,
                                    out_pt) != AES_OK ||
                    memcmp(out_pt, msg, msg_len) != 0)
-          {
             ++failed;
-            if (failed <= 8)
-              fprintf(stderr, "siv valid decrypt fail msglen=%zu\n", msg_len);
-          }
         }
         else
         {
           if (AES_SIV_decrypt(key, ad, ad_lens, 2, tag, ct, ct_len,
                               out_pt) != AES_ERR)
-          {
             ++failed;
-            if (failed <= 8)
-              fprintf(stderr, "siv invalid accepted ivlen=%zu msglen=%zu\n",
-                      iv_len, msg_len);
-          }
         }
         have = 0;
         key_hex[0] = '\0';
@@ -341,7 +338,9 @@ static MunitResult test_siv_wycheproof(const MunitParameter params[], void* data
   }
 
   fclose(file);
-  munit_assert_uint(ran, >, 0);
+  munit_assert_uint(ran, ==, expect_total);
+  munit_assert_uint(ran_valid, ==, expect_valid);
+  munit_assert_uint(ran_invalid, ==, expect_invalid);
   munit_assert_uint(failed, ==, 0);
   return MUNIT_OK;
 }
@@ -350,13 +349,24 @@ static MunitResult test_siv_api(const MunitParameter params[], void* data)
 {
   uint8_t key[AES_SIV_KEYLEN];
   uint8_t v[AES_SIV_V_LEN];
-  uint8_t buf[16];
+  uint8_t v2[AES_SIV_V_LEN];
+  uint8_t buf[32];
+  uint8_t saved[32];
+  uint8_t pt[16];
+  uint8_t ct[16];
+  uint8_t empty;
+  const uint8_t* ad[AES_SIV_MAX_AD + 1u];
+  size_t ad_lens[AES_SIV_MAX_AD + 1u];
+  size_t i;
 
   (void) params;
   (void) data;
 
   memset(key, 0x11, sizeof(key));
   memset(buf, 0x22, sizeof(buf));
+  memset(pt, 0x33, sizeof(pt));
+
+  /* NULL / bound checks */
   munit_assert_int(AES_SIV_encrypt(NULL, NULL, NULL, 0, buf, sizeof(buf), v,
                                    buf), ==, AES_ERR);
   munit_assert_int(AES_SIV_encrypt(key, NULL, NULL, 1, buf, sizeof(buf), v,
@@ -366,8 +376,70 @@ static MunitResult test_siv_api(const MunitParameter params[], void* data)
   munit_assert_int(AES_SIV_encrypt(key, NULL, NULL, 0, buf, sizeof(buf), NULL,
                                    buf), ==, AES_ERR);
 
-  munit_assert_int(AES_SIV_encrypt(key, NULL, NULL, 0, buf, sizeof(buf), v,
-                                   buf), ==, AES_OK);
+  /* Empty plaintext, no AD */
+  munit_assert_int(AES_SIV_encrypt(key, NULL, NULL, 0, NULL, 0, v, NULL),
+                   ==, AES_OK);
+  munit_assert_int(AES_SIV_decrypt(key, NULL, NULL, 0, v, NULL, 0, NULL),
+                   ==, AES_OK);
+
+  /* Zero-length AD component vs no AD — both valid, different transcripts */
+  ad[0] = &empty;
+  ad_lens[0] = 0;
+  munit_assert_int(AES_SIV_encrypt(key, ad, ad_lens, 1, pt, sizeof(pt), v, ct),
+                   ==, AES_OK);
+  munit_assert_int(AES_SIV_encrypt(key, NULL, NULL, 0, pt, sizeof(pt), v2, buf),
+                   ==, AES_OK);
+  munit_assert_memory_not_equal(AES_SIV_V_LEN, v, v2);
+
+  /* 126 AD components accepted; 127 rejected */
+  for (i = 0; i < AES_SIV_MAX_AD + 1u; ++i)
+  {
+    ad[i] = &empty;
+    ad_lens[i] = 0;
+  }
+  munit_assert_int(AES_SIV_encrypt(key, ad, ad_lens, AES_SIV_MAX_AD, pt,
+                                   sizeof(pt), v, ct), ==, AES_OK);
+  munit_assert_int(AES_SIV_encrypt(key, ad, ad_lens, AES_SIV_MAX_AD + 1u, pt,
+                                   sizeof(pt), v, ct), ==, AES_ERR);
+
+  /* In-place encrypt/decrypt success */
+  memcpy(buf, pt, sizeof(pt));
+  munit_assert_int(AES_SIV_encrypt(key, NULL, NULL, 0, buf, sizeof(pt), v, buf),
+                   ==, AES_OK);
+  munit_assert_int(AES_SIV_decrypt(key, NULL, NULL, 0, v, buf, sizeof(pt), buf),
+                   ==, AES_OK);
+  munit_assert_memory_equal(sizeof(pt), buf, pt);
+
+  /* In-place decrypt failure wipes the buffer completely */
+  memcpy(buf, pt, sizeof(pt));
+  munit_assert_int(AES_SIV_encrypt(key, NULL, NULL, 0, buf, sizeof(pt), v, buf),
+                   ==, AES_OK);
+  v[0] ^= 1u;
+  munit_assert_int(AES_SIV_decrypt(key, NULL, NULL, 0, v, buf, sizeof(pt), buf),
+                   ==, AES_ERR);
+  for (i = 0; i < sizeof(pt); ++i)
+    munit_assert_uint8(buf[i], ==, 0);
+  v[0] ^= 1u;
+
+  /* Partial pt/ct overlap rejected; buffers unchanged */
+  memcpy(buf, pt, sizeof(pt));
+  memcpy(saved, buf, sizeof(buf));
+  munit_assert_int(AES_SIV_encrypt(key, NULL, NULL, 0, buf, sizeof(pt), v,
+                                   buf + 1), ==, AES_ERR);
+  munit_assert_memory_equal(sizeof(buf), buf, saved);
+
+  /* v may overlap plaintext (staged); still succeeds */
+  memcpy(buf, pt, sizeof(pt));
+  munit_assert_int(AES_SIV_encrypt(key, NULL, NULL, 0, buf, sizeof(pt), buf, ct),
+                   ==, AES_OK);
+  /* first 16 bytes of buf are now V; decrypt with that V into pt-sized tail */
+  {
+    uint8_t rec[16];
+    munit_assert_int(AES_SIV_decrypt(key, NULL, NULL, 0, buf, ct, sizeof(pt),
+                                     rec), ==, AES_OK);
+    munit_assert_memory_equal(sizeof(pt), rec, pt);
+  }
+
   return MUNIT_OK;
 }
 
