@@ -187,8 +187,7 @@ static MunitResult test_siv_rfc_a2(const MunitParameter params[], void* data)
 static MunitResult test_siv_wycheproof(const MunitParameter params[], void* data)
 {
   FILE* file;
-  char* line = NULL;
-  size_t line_cap = 0;
+  char line[2048];
   char key_hex[256];
   char iv_hex[128];
   char aad_hex[4096];
@@ -209,10 +208,10 @@ static MunitResult test_siv_wycheproof(const MunitParameter params[], void* data
   key_hex[0] = iv_hex[0] = aad_hex[0] = msg_hex[0] = ct_hex[0] = tag_hex[0] =
     result[0] = '\0';
 
-  file = fopen(SIV_VECTOR_FILE, "r");
+  file = fopen(SIV_VECTOR_FILE, "rb");
   munit_assert_not_null(file);
 
-  while (getline(&line, &line_cap, file) != -1)
+  while (fgets(line, (int)sizeof(line), file) != NULL)
   {
     char* p = line;
     while (*p == ' ' || *p == '\t')
@@ -341,7 +340,6 @@ static MunitResult test_siv_wycheproof(const MunitParameter params[], void* data
     }
   }
 
-  free(line);
   fclose(file);
   munit_assert_uint(ran, >, 0);
   munit_assert_uint(failed, ==, 0);
