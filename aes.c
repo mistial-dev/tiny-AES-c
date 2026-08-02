@@ -135,12 +135,25 @@ static const uint8_t Rcon[11] = {
 /* Private functions:                                                        */
 /*****************************************************************************/
 /*
+ * Read the S-box without using a secret-indexed lookup. Reading every entry
+ * keeps the memory-access pattern independent of the input byte. The
+ * volatile pointer also prevents the compiler from replacing this scan with
+ * a direct table lookup.
+ */
 static uint8_t getSBoxValue(uint8_t num)
 {
-  return sbox[num];
+  const volatile uint8_t *table = sbox;
+  uint8_t value = 0;
+  unsigned i;
+
+  for (i = 0; i < 256; ++i)
+  {
+    const uint8_t mask = (uint8_t)(0u - (uint8_t)(i == num));
+    value |= table[i] & mask;
+  }
+
+  return value;
 }
-*/
-#define getSBoxValue(num) (sbox[(num)])
 
 // This function produces Nb(Nr+1) round keys. The round keys are used in each round to decrypt the states. 
 static void KeyExpansion(uint8_t* RoundKey, const uint8_t* Key)
@@ -336,13 +349,20 @@ static uint8_t Multiply(uint8_t x, uint8_t y)
 #endif
 
 #if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1)
-/*
 static uint8_t getSBoxInvert(uint8_t num)
 {
-  return rsbox[num];
+  const volatile uint8_t *table = rsbox;
+  uint8_t value = 0;
+  unsigned i;
+
+  for (i = 0; i < 256; ++i)
+  {
+    const uint8_t mask = (uint8_t)(0u - (uint8_t)(i == num));
+    value |= table[i] & mask;
+  }
+
+  return value;
 }
-*/
-#define getSBoxInvert(num) (rsbox[(num)])
 
 // MixColumns function mixes the columns of the state matrix.
 // The method used to multiply may be difficult to understand for the inexperienced.
@@ -569,4 +589,3 @@ void AES_CTR_xcrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length)
 }
 
 #endif // #if defined(CTR) && (CTR == 1)
-
