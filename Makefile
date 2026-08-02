@@ -12,6 +12,8 @@ AES_ENABLE_ECB ?= 0
 AES_ENABLE_CTR ?= 1
 AES_ENABLE_OFB ?= 0
 AES_ENABLE_GCM ?= 0
+AES_ENABLE_CCM ?= 0
+AES_CCM_CAVP ?= 0
 AES_GCM_GHASH_MODE ?= auto
 BENCHMARK_BYTES ?= 16384
 BENCHMARK_ITERATIONS ?= 100
@@ -36,7 +38,8 @@ $(error AES_WIDE_OPS must be off or auto)
 endif
 
 MODE_DEFINITIONS = -DCBC=$(AES_ENABLE_CBC) -DECB=$(AES_ENABLE_ECB) \
-  -DCTR=$(AES_ENABLE_CTR) -DOFB=$(AES_ENABLE_OFB) -DGCM=$(AES_ENABLE_GCM)
+  -DCTR=$(AES_ENABLE_CTR) -DOFB=$(AES_ENABLE_OFB) -DGCM=$(AES_ENABLE_GCM) \
+  -DCCM=$(AES_ENABLE_CCM)
 ifeq ($(AES_GCM_GHASH_MODE),auto)
 GHASH_DEFINITION = -DAES_GCM_GHASH_MODE=0
 GHASH_MODE = 0
@@ -103,22 +106,25 @@ test:
 	      cbc-ctr-ofb) cbc=1; ecb=0; ctr=1; ofb=1 ;; \
 	      all) cbc=1; ecb=1; ctr=1; ofb=1 ;; \
 	    esac; \
-    for gcm in 0 1; do \
+	  for gcm in 0 1; do \
+	    if [ "$$mode" = none ]; then ccm_modes="0 1"; else ccm_modes="0"; fi; \
+	    for ccm in $$ccm_modes; do \
       if [ $$gcm -eq 0 ]; then ghash_modes="0"; else ghash_modes="0 1 2 3 4"; fi; \
       for ghash in $$ghash_modes; do \
       for sbox in 1 2 3; do \
         for wide in 0 1; do \
-          name=$${key}-$${mode}-gcm$${gcm}-ghash$${ghash}-sbox$${sbox}-wide$${wide}; \
-		  $(CC) $(CFLAGS) -DCBC=$$cbc -DECB=$$ecb -DCTR=$$ctr -DOFB=$$ofb -DGCM=$$gcm \
+          name=$${key}-$${mode}-gcm$${gcm}-ccm$${ccm}-ghash$${ghash}-sbox$${sbox}-wide$${wide}; \
+          $(CC) $(CFLAGS) -DCBC=$$cbc -DECB=$$ecb -DCTR=$$ctr -DOFB=$$ofb -DGCM=$$gcm -DCCM=$$ccm -DAES_CCM_CAVP=$(AES_CCM_CAVP) \
           -DAES$${key}=1 -DAES_SBOX_MODE=$$sbox -DAES_WIDE_OPS=$$wide -DAES_GCM_GHASH_MODE=$$ghash \
           -c aes.c -o $(TEST_BUILD_DIR)/aes-$${name}.o; \
-		  $(CC) $(CFLAGS) -DCBC=$$cbc -DECB=$$ecb -DCTR=$$ctr -DOFB=$$ofb -DGCM=$$gcm \
+          $(CC) $(CFLAGS) -DCBC=$$cbc -DECB=$$ecb -DCTR=$$ctr -DOFB=$$ofb -DGCM=$$gcm -DCCM=$$ccm -DAES_CCM_CAVP=$(AES_CCM_CAVP) \
           -DAES$${key}=1 -DAES_SBOX_MODE=$$sbox -DAES_WIDE_OPS=$$wide -DAES_GCM_GHASH_MODE=$$ghash \
           -c test.c -o $(TEST_BUILD_DIR)/test-$${name}.o; \
-          $(CC) $(CFLAGS) -o $(TEST_BUILD_DIR)/test-$${name} \
+	          $(CC) $(CFLAGS) -o $(TEST_BUILD_DIR)/test-$${name} \
           $(TEST_BUILD_DIR)/aes-$${name}.o \
           $(TEST_BUILD_DIR)/test-$${name}.o $(TEST_BUILD_DIR)/munit.o; \
-          $(TEST_BUILD_DIR)/test-$${name}; \
+	          $(TEST_BUILD_DIR)/test-$${name}; \
+	        done; \
       done; \
       done; \
       done; \

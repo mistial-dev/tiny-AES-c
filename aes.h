@@ -14,7 +14,9 @@
 // CBC enables AES encryption in CBC-mode of operation.
 // CTR enables encryption in counter-mode.
 // OFB enables encryption in output-feedback mode.
+// CCM enables one-shot authenticated encryption in CCM mode.
 // ECB enables the basic ECB 16-byte block algorithm. Modes can be enabled simultaneously.
+// GCM enables streaming authenticated encryption in GCM mode.
 
 // The #ifndef-guard allows it to be configured before #include'ing or at compile time.
 #ifndef CBC
@@ -35,6 +37,10 @@
 
 #ifndef GCM
   #define GCM 0
+#endif
+
+#ifndef CCM
+  #define CCM 0
 #endif
 
 /* GCM GHASH implementation profiles. */
@@ -184,6 +190,7 @@ struct AES_GCM_ctx
     (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_FAST_TABLE)
       uint8_t ghash_table[32][16][AES_BLOCKLEN];
 #endif
+
   uint64_t aad_len;
   uint64_t text_len;
   size_t stream_pos;
@@ -220,5 +227,22 @@ void AES_GCM_clear(struct AES_GCM_ctx* ctx);
 
 #endif // #if defined(GCM) && (GCM == 1)
 
+#if defined(CCM) && (CCM == 1)
+
+#define AES_CCM_SUCCESS 0
+#define AES_CCM_ERROR   (-1)
+
+/* CCM is a packet mode: the payload and AAD lengths are known at entry. */
+int AES_CCM_encrypt(const uint8_t* key, const uint8_t* nonce,
+                    size_t nonce_len, const uint8_t* aad, size_t aad_len,
+                    const uint8_t* plaintext, size_t plaintext_len,
+                    uint8_t* ciphertext, uint8_t* tag, size_t tag_len);
+int AES_CCM_decrypt(const uint8_t* key, const uint8_t* nonce,
+                    size_t nonce_len, const uint8_t* aad, size_t aad_len,
+                    const uint8_t* ciphertext, size_t ciphertext_len,
+                    const uint8_t* tag, size_t tag_len,
+                    uint8_t* plaintext);
+
+#endif
 
 #endif // _AES_H_

@@ -7,6 +7,9 @@
  */
 
 #include <string.h>
+#include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "aes.h"
 #include "munit.h"
@@ -33,6 +36,10 @@
 #define TEST_CBC_CIPHERTEXT aes128_cbc_ciphertext
 #define TEST_CTR_CIPHERTEXT aes128_ctr_ciphertext
 #define TEST_OFB_CIPHERTEXT aes128_ofb_ciphertext
+#endif
+
+#ifndef CCM_VECTOR_DIR
+#define CCM_VECTOR_DIR "test_vectors/ccm"
 #endif
 
 #if AES_SBOX_MODE == AES_SBOX_MODE_RUNTIME
@@ -219,6 +226,430 @@ static MunitResult test_ofb(const MunitParameter params[], void* data)
 }
 #endif
 
+#if defined(CCM) && (CCM == 1)
+#if !defined(AES192) && !defined(AES256)
+static void test_ccm_vector(const uint8_t* key, const uint8_t* nonce,
+                            size_t nonce_len, const uint8_t* aad,
+                            size_t aad_len, const uint8_t* plaintext,
+                            size_t plaintext_len, const uint8_t* ciphertext,
+                            const uint8_t* tag, size_t tag_len)
+{
+  uint8_t buffer[64] = { 0 };
+  uint8_t output[64] = { 0 };
+  uint8_t generated_tag[16] = { 0 };
+
+  memcpy(buffer, plaintext, plaintext_len);
+  munit_assert_int(AES_CCM_encrypt(key, nonce, nonce_len, aad, aad_len,
+                                   buffer, plaintext_len, output,
+                                   generated_tag, tag_len), ==,
+                   AES_CCM_SUCCESS);
+  munit_assert_memory_equal(plaintext_len, output, ciphertext);
+  munit_assert_memory_equal(tag_len, generated_tag, tag);
+
+  memset(buffer, 0, sizeof(buffer));
+  munit_assert_int(AES_CCM_decrypt(key, nonce, nonce_len, aad, aad_len,
+                                   output, plaintext_len, tag, tag_len,
+                                   buffer), ==, AES_CCM_SUCCESS);
+  munit_assert_memory_equal(plaintext_len, buffer, plaintext);
+
+  generated_tag[0] ^= 1;
+  memset(buffer, 0xa5, sizeof(buffer));
+  munit_assert_int(AES_CCM_decrypt(key, nonce, nonce_len, aad, aad_len,
+                                   output, plaintext_len, generated_tag,
+                                   tag_len, buffer), ==, AES_CCM_ERROR);
+  for (size_t i = 0; i < plaintext_len; ++i)
+    munit_assert_uint8(buffer[i], ==, 0);
+}
+
+static MunitResult test_ccm(const MunitParameter params[], void* data)
+{
+  static uint8_t nist_aad4[65536];
+  size_t i;
+
+  (void) params;
+  (void) data;
+
+  test_initialize_sbox();
+  for (i = 0; i < sizeof(nist_aad4); ++i)
+    nist_aad4[i] = (uint8_t)i;
+  test_ccm_vector(ccm_nist_key, ccm_nist_nonce1, sizeof(ccm_nist_nonce1),
+                  ccm_nist_aad1, sizeof(ccm_nist_aad1), ccm_nist_plaintext1,
+                  sizeof(ccm_nist_plaintext1), ccm_nist_ciphertext1,
+                  ccm_nist_tag1, sizeof(ccm_nist_tag1));
+  test_ccm_vector(ccm_nist_key, ccm_nist_nonce2, sizeof(ccm_nist_nonce2),
+                  ccm_nist_aad2, sizeof(ccm_nist_aad2), ccm_nist_plaintext2,
+                  sizeof(ccm_nist_plaintext2), ccm_nist_ciphertext2,
+                  ccm_nist_tag2, sizeof(ccm_nist_tag2));
+  test_ccm_vector(ccm_nist_key, ccm_nist_nonce4, sizeof(ccm_nist_nonce4),
+                  nist_aad4, sizeof(nist_aad4), ccm_nist_plaintext4,
+                  sizeof(ccm_nist_plaintext4), ccm_nist_ciphertext4,
+                  ccm_nist_tag4, sizeof(ccm_nist_tag4));
+  test_ccm_vector(ccm_rfc_key, ccm_rfc_nonce, sizeof(ccm_rfc_nonce),
+                  ccm_rfc_aad, sizeof(ccm_rfc_aad), ccm_rfc_plaintext,
+                  sizeof(ccm_rfc_plaintext), ccm_rfc_ciphertext, ccm_rfc_tag,
+                  sizeof(ccm_rfc_tag));
+  return MUNIT_OK;
+}
+
+static MunitResult test_ccm_api(const MunitParameter params[], void* data)
+{
+  static uint8_t large_aad[65280];
+  static uint8_t max_plaintext[65535];
+  static uint8_t max_ciphertext[65535];
+  static uint8_t max_plaintext_copy[65535];
+  static const uint8_t nonce13[13] = { 0 };
+  uint8_t buffer[64] = { 0 };
+  uint8_t ciphertext[64] = { 0 };
+  uint8_t tag[16] = { 0 };
+  uint8_t bad_aad[sizeof(ccm_nist_aad1)];
+  uint8_t bad_nonce[sizeof(ccm_nist_nonce1)];
+  uint8_t bad_tag[sizeof(ccm_nist_tag1)];
+  uint8_t one = 0;
+  size_t i;
+
+  (void) params;
+  (void) data;
+
+  test_initialize_sbox();
+  memcpy(bad_aad, ccm_nist_aad1, sizeof(bad_aad));
+  memcpy(bad_nonce, ccm_nist_nonce1, sizeof(bad_nonce));
+  memcpy(bad_tag, ccm_nist_tag1, sizeof(bad_tag));
+
+  munit_assert_int(AES_CCM_encrypt(ccm_nist_key, ccm_nist_nonce1, 6,
+                                   ccm_nist_aad1, sizeof(ccm_nist_aad1),
+                                   ccm_nist_plaintext1,
+                                   sizeof(ccm_nist_plaintext1), ciphertext,
+                                   tag, sizeof(ccm_nist_tag1)), ==, AES_CCM_ERROR);
+  munit_assert_int(AES_CCM_encrypt(ccm_nist_key, ccm_nist_nonce1, 14,
+                                   ccm_nist_aad1, sizeof(ccm_nist_aad1),
+                                   ccm_nist_plaintext1,
+                                   sizeof(ccm_nist_plaintext1), ciphertext,
+                                   tag, sizeof(ccm_nist_tag1)), ==, AES_CCM_ERROR);
+  for (i = 0; i <= 18; ++i)
+  {
+    if (i == 4 || i == 6 || i == 8 || i == 10 || i == 12 || i == 14 || i == 16)
+      continue;
+    munit_assert_int(AES_CCM_encrypt(ccm_nist_key, ccm_nist_nonce1,
+                                     sizeof(ccm_nist_nonce1), ccm_nist_aad1,
+                                     sizeof(ccm_nist_aad1), ccm_nist_plaintext1,
+                                     sizeof(ccm_nist_plaintext1), ciphertext,
+                                     tag, i), ==, AES_CCM_ERROR);
+  }
+
+  munit_assert_int(AES_CCM_encrypt(NULL, ccm_nist_nonce1,
+                                   sizeof(ccm_nist_nonce1), NULL, 0, NULL, 0,
+                                   NULL, tag, sizeof(tag)), ==, AES_CCM_ERROR);
+  munit_assert_int(AES_CCM_encrypt(ccm_nist_key, NULL,
+                                   sizeof(ccm_nist_nonce1), NULL, 0, NULL, 0,
+                                   NULL, tag, sizeof(tag)), ==, AES_CCM_ERROR);
+  munit_assert_int(AES_CCM_encrypt(ccm_nist_key, ccm_nist_nonce1,
+                                   sizeof(ccm_nist_nonce1), ccm_nist_aad1, 1,
+                                   NULL, 0, NULL, tag, sizeof(tag)), ==, AES_CCM_SUCCESS);
+  munit_assert_int(AES_CCM_encrypt(ccm_nist_key, ccm_nist_nonce1,
+                                   sizeof(ccm_nist_nonce1), NULL, 1, NULL, 0,
+                                   NULL, tag, sizeof(tag)), ==, AES_CCM_ERROR);
+  munit_assert_int(AES_CCM_encrypt(ccm_nist_key, ccm_nist_nonce1,
+                                   sizeof(ccm_nist_nonce1), NULL, 0, &one, 1,
+                                   NULL, tag, sizeof(tag)), ==, AES_CCM_ERROR);
+  munit_assert_int(AES_CCM_encrypt(ccm_nist_key, ccm_nist_nonce1,
+                                   sizeof(ccm_nist_nonce1), NULL, 0, &one, 1,
+                                   ciphertext, NULL, sizeof(tag)), ==, AES_CCM_ERROR);
+
+  memcpy(buffer, ccm_nist_plaintext1, sizeof(ccm_nist_plaintext1));
+  munit_assert_int(AES_CCM_encrypt(ccm_nist_key, ccm_nist_nonce1,
+                                   sizeof(ccm_nist_nonce1), ccm_nist_aad1,
+                                   sizeof(ccm_nist_aad1), buffer,
+                                   sizeof(ccm_nist_plaintext1), buffer, tag,
+                                   sizeof(ccm_nist_tag1)), ==, AES_CCM_SUCCESS);
+  munit_assert_memory_equal(sizeof(ccm_nist_ciphertext1), buffer,
+                            ccm_nist_ciphertext1);
+  munit_assert_memory_equal(sizeof(ccm_nist_tag1), tag, ccm_nist_tag1);
+  munit_assert_int(AES_CCM_decrypt(ccm_nist_key, ccm_nist_nonce1,
+                                   sizeof(ccm_nist_nonce1), ccm_nist_aad1,
+                                   sizeof(ccm_nist_aad1), buffer,
+                                   sizeof(ccm_nist_plaintext1), tag,
+                                   sizeof(ccm_nist_tag1), buffer), ==,
+                   AES_CCM_SUCCESS);
+  munit_assert_memory_equal(sizeof(ccm_nist_plaintext1), buffer,
+                            ccm_nist_plaintext1);
+
+  memcpy(ciphertext, ccm_nist_ciphertext1, sizeof(ccm_nist_ciphertext1));
+  ciphertext[0] ^= 1;
+  memset(buffer, 0xa5, sizeof(buffer));
+  munit_assert_int(AES_CCM_decrypt(ccm_nist_key, ccm_nist_nonce1,
+                                   sizeof(ccm_nist_nonce1), ccm_nist_aad1,
+                                   sizeof(ccm_nist_aad1), ciphertext,
+                                   sizeof(ccm_nist_ciphertext1),
+                                   ccm_nist_tag1, sizeof(ccm_nist_tag1),
+                                   buffer), ==, AES_CCM_ERROR);
+  for (i = 0; i < sizeof(ccm_nist_plaintext1); ++i)
+    munit_assert_uint8(buffer[i], ==, 0);
+
+  bad_tag[0] ^= 1;
+  memset(buffer, 0xa5, sizeof(buffer));
+  munit_assert_int(AES_CCM_decrypt(ccm_nist_key, ccm_nist_nonce1,
+                                   sizeof(ccm_nist_nonce1), ccm_nist_aad1,
+                                   sizeof(ccm_nist_aad1),
+                                   ccm_nist_ciphertext1,
+                                   sizeof(ccm_nist_ciphertext1), bad_tag,
+                                   sizeof(bad_tag), buffer), ==, AES_CCM_ERROR);
+  bad_aad[0] ^= 1;
+  munit_assert_int(AES_CCM_decrypt(ccm_nist_key, ccm_nist_nonce1,
+                                   sizeof(ccm_nist_nonce1), bad_aad,
+                                   sizeof(bad_aad), ccm_nist_ciphertext1,
+                                   sizeof(ccm_nist_ciphertext1), ccm_nist_tag1,
+                                   sizeof(ccm_nist_tag1), buffer), ==,
+                   AES_CCM_ERROR);
+  bad_nonce[0] ^= 1;
+  munit_assert_int(AES_CCM_decrypt(ccm_nist_key, bad_nonce, sizeof(bad_nonce),
+                                   ccm_nist_aad1, sizeof(ccm_nist_aad1),
+                                   ccm_nist_ciphertext1,
+                                   sizeof(ccm_nist_ciphertext1), ccm_nist_tag1,
+                                   sizeof(ccm_nist_tag1), buffer), ==,
+                   AES_CCM_ERROR);
+
+  for (i = 0; i < sizeof(large_aad); ++i)
+    large_aad[i] = (uint8_t)i;
+  for (i = 0; i < 2; ++i)
+  {
+    const size_t aad_len = i == 0 ? 65279u : 65280u;
+    munit_assert_int(AES_CCM_encrypt(ccm_nist_key, ccm_nist_nonce1,
+                                     sizeof(ccm_nist_nonce1), large_aad,
+                                     aad_len, ccm_nist_plaintext1,
+                                     sizeof(ccm_nist_plaintext1), ciphertext,
+                                     tag, sizeof(ccm_nist_tag1)), ==,
+                     AES_CCM_SUCCESS);
+    munit_assert_int(AES_CCM_decrypt(ccm_nist_key, ccm_nist_nonce1,
+                                     sizeof(ccm_nist_nonce1), large_aad,
+                                     aad_len, ciphertext,
+                                     sizeof(ccm_nist_plaintext1), tag,
+                                     sizeof(ccm_nist_tag1), buffer), ==,
+                     AES_CCM_SUCCESS);
+    munit_assert_memory_equal(sizeof(ccm_nist_plaintext1), buffer,
+                              ccm_nist_plaintext1);
+  }
+
+  memset(max_plaintext, 0x5a, sizeof(max_plaintext));
+  memcpy(max_plaintext_copy, max_plaintext, sizeof(max_plaintext));
+  munit_assert_int(AES_CCM_encrypt(ccm_nist_key, nonce13, sizeof(nonce13),
+                                   NULL, 0, max_plaintext,
+                                   sizeof(max_plaintext), max_ciphertext, tag,
+                                   sizeof(ccm_nist_tag1)), ==, AES_CCM_SUCCESS);
+  munit_assert_int(AES_CCM_decrypt(ccm_nist_key, nonce13, sizeof(nonce13),
+                                   NULL, 0, max_ciphertext,
+                                   sizeof(max_ciphertext), tag,
+                                   sizeof(ccm_nist_tag1), max_plaintext), ==,
+                   AES_CCM_SUCCESS);
+  munit_assert_memory_equal(sizeof(max_plaintext), max_plaintext,
+                            max_plaintext_copy);
+  munit_assert_int(AES_CCM_encrypt(ccm_nist_key, nonce13, sizeof(nonce13),
+                                   NULL, 0, &one, sizeof(max_plaintext) + 1,
+                                   max_ciphertext, tag,
+                                   sizeof(ccm_nist_tag1)), ==, AES_CCM_ERROR);
+  for (i = 7; i <= 13; ++i)
+  {
+    const unsigned q = (unsigned)(15 - i);
+    const uint64_t maximum = q == sizeof(uint64_t) ? UINT64_MAX :
+                             ((UINT64_C(1) << (8u * q)) - 1u);
+    if (maximum < (uint64_t)SIZE_MAX)
+    {
+      const size_t over = (size_t)(maximum + 1u);
+      munit_assert_int(AES_CCM_encrypt(ccm_nist_key, nonce13, i, NULL, 0,
+                                       &one, over, ciphertext, tag,
+                                       sizeof(ccm_nist_tag1)), ==,
+                       AES_CCM_ERROR);
+    }
+  }
+
+  return MUNIT_OK;
+}
+
+#endif
+
+#if defined(AES_CCM_CAVP) && (AES_CCM_CAVP == 1)
+static size_t ccm_parse_hex(const char* line, uint8_t* output)
+{
+  const char* p = strchr(line, '=');
+  size_t length = 0;
+
+  if (p == NULL)
+    return 0;
+  ++p;
+  while (*p != '\0' && *p != '\n' && *p != '\r')
+  {
+    unsigned value;
+    if (!isxdigit((unsigned char)p[0]))
+    {
+      ++p;
+      continue;
+    }
+    value = (unsigned)(isdigit((unsigned char)p[0]) ? p[0] - '0' :
+                       tolower((unsigned char)p[0]) - 'a' + 10) << 4;
+    ++p;
+    while (*p != '\0' && !isxdigit((unsigned char)*p))
+      ++p;
+    if (*p == '\0' || *p == '\n' || *p == '\r')
+      break;
+    value |= (unsigned)(isdigit((unsigned char)*p) ? *p - '0' :
+                        tolower((unsigned char)*p) - 'a' + 10);
+    output[length++] = (uint8_t)value;
+    ++p;
+  }
+  return length;
+}
+
+static size_t ccm_parse_number(const char* line)
+{
+  const char* p = strchr(line, '=');
+  return p == NULL ? 0 : (size_t)strtoull(p + 1, NULL, 10);
+}
+
+static int ccm_run_cavp_case(const uint8_t* key, size_t key_len,
+                             const uint8_t* nonce, size_t nonce_len,
+                             const uint8_t* aad, size_t aad_len,
+                             const uint8_t* payload, size_t payload_len,
+                             const uint8_t* ct, size_t ct_len, size_t tag_len,
+                             int decrypt_vector, int expected_pass)
+{
+  uint8_t output[128] = { 0 };
+  uint8_t tag[16] = { 0 };
+  int result;
+
+  (void) key_len;
+  if (decrypt_vector)
+  {
+    result = AES_CCM_decrypt(key, nonce, nonce_len, aad, aad_len, ct,
+                             payload_len, ct + payload_len, tag_len, output);
+    if (!expected_pass)
+      return result == AES_CCM_ERROR;
+    return result == AES_CCM_SUCCESS &&
+           memcmp(output, payload, payload_len) == 0;
+  }
+
+  result = AES_CCM_encrypt(key, nonce, nonce_len, aad, aad_len, payload,
+                           payload_len, output, tag, tag_len);
+  return result == AES_CCM_SUCCESS &&
+         ct_len == payload_len + tag_len &&
+         memcmp(output, ct, payload_len) == 0 &&
+         memcmp(tag, ct + payload_len, tag_len) == 0;
+}
+
+static int ccm_run_cavp_file(const char* filename)
+{
+  FILE* file;
+  char line[256];
+  char path[256];
+  uint8_t key[32] = { 0 };
+  uint8_t nonce[13] = { 0 };
+  uint8_t aad[128] = { 0 };
+  uint8_t payload[128] = { 0 };
+  uint8_t ct[160] = { 0 };
+  size_t key_len = 0;
+  size_t nonce_len = 0;
+  size_t aad_len = 0;
+  size_t payload_len = 0;
+  size_t ct_len = 0;
+  size_t alen = 0;
+  size_t plen = 0;
+  size_t nlen = 0;
+  size_t tlen = 0;
+  int have_key = 0;
+  int have_nonce = 0;
+  int have_aad = 0;
+  int have_payload = 0;
+  int have_ct = 0;
+  int decrypt_vector = strstr(filename, "DVPT") != NULL;
+  int expected_pass = 1;
+
+  snprintf(path, sizeof(path), "%s/%s", CCM_VECTOR_DIR, filename);
+  file = fopen(path, "r");
+  if (file == NULL)
+    return 0;
+  while (fgets(line, sizeof(line), file) != NULL)
+  {
+    if (line[0] == '[')
+    {
+      const char* p;
+      p = strstr(line, "Alen ="); if (p != NULL) alen = ccm_parse_number(p);
+      p = strstr(line, "Plen ="); if (p != NULL) plen = ccm_parse_number(p);
+      p = strstr(line, "Nlen ="); if (p != NULL) nlen = ccm_parse_number(p);
+      p = strstr(line, "Tlen ="); if (p != NULL) tlen = ccm_parse_number(p);
+      continue;
+    }
+    if (strncmp(line, "Count =", 7) == 0)
+    {
+      have_aad = have_payload = have_ct = 0;
+      expected_pass = 1;
+    }
+    else if (strncmp(line, "Key =", 6) == 0)
+    {
+      key_len = ccm_parse_hex(line, key); have_key = 1;
+    }
+    else if (strncmp(line, "Nonce =", 8) == 0)
+    {
+      nonce_len = ccm_parse_hex(line, nonce); have_nonce = 1;
+    }
+    else if (strncmp(line, "Adata =", 7) == 0)
+    {
+      aad_len = ccm_parse_hex(line, aad); have_aad = 1;
+    }
+    else if (strncmp(line, "Payload =", 9) == 0)
+    {
+      payload_len = ccm_parse_hex(line, payload); have_payload = 1;
+    }
+    else if (strncmp(line, "CT =", 5) == 0)
+    {
+      ct_len = ccm_parse_hex(line, ct); have_ct = 1;
+    }
+    else if (strncmp(line, "Result = Fail", 14) == 0)
+    {
+      expected_pass = 0;
+    }
+    if (have_key && have_nonce && have_aad && have_payload && have_ct &&
+        (!decrypt_vector || strstr(line, "Result =") != NULL))
+    {
+      const size_t actual_aad_len = alen == 0 ? 0 : aad_len;
+      const size_t actual_payload_len = plen == 0 ? 0 : payload_len;
+      const size_t actual_nonce_len = nlen == 0 ? nonce_len : nlen / 8;
+      const size_t actual_tag_len = tlen == 0 ? ct_len - actual_payload_len : tlen / 8;
+      if (actual_aad_len > sizeof(aad) || actual_payload_len > sizeof(payload) ||
+          actual_nonce_len > sizeof(nonce) || ct_len > sizeof(ct) ||
+          !ccm_run_cavp_case(key, key_len, nonce, actual_nonce_len, aad,
+                             actual_aad_len, payload, actual_payload_len, ct,
+                             ct_len, actual_tag_len, decrypt_vector,
+                             expected_pass))
+      {
+        fclose(file);
+        return 0;
+      }
+      have_aad = have_payload = have_ct = 0;
+    }
+  }
+  fclose(file);
+  return 1;
+}
+
+static MunitResult test_ccm_cavp(const MunitParameter params[], void* data)
+{
+  static const char* const files[] = {
+    "DVPT128.rsp", "DVPT192.rsp", "DVPT256.rsp",
+    "VADT128.rsp", "VADT192.rsp", "VADT256.rsp",
+    "VNT128.rsp", "VNT192.rsp", "VNT256.rsp",
+    "VPT128.rsp", "VPT192.rsp", "VPT256.rsp",
+    "VTT128.rsp", "VTT192.rsp", "VTT256.rsp"
+  };
+  size_t i;
+
+  (void) params;
+  (void) data;
+  test_initialize_sbox();
+  for (i = 0; i < sizeof(files) / sizeof(files[0]); ++i)
+    munit_assert_true(ccm_run_cavp_file(files[i]));
+  return MUNIT_OK;
+}
+#endif
+#endif
+
 #if defined(GCM) && (GCM == 1)
 static MunitResult test_gcm(const MunitParameter params[], void* data)
 {
@@ -343,6 +774,15 @@ static MunitTest test_suite_tests[] = {
 #endif
 #if defined(OFB) && (OFB == 1)
   { "/ofb", test_ofb, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+#endif
+#if defined(CCM) && (CCM == 1)
+#if !defined(AES192) && !defined(AES256)
+  { "/ccm", test_ccm, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+  { "/ccm-api", test_ccm_api, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+#endif
+#if defined(AES_CCM_CAVP) && (AES_CCM_CAVP == 1)
+  { "/ccm-cavp", test_ccm_cavp, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+#endif
 #endif
 #if defined(GCM) && (GCM == 1)
   { "/gcm", test_gcm, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },

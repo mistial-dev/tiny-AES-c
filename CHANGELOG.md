@@ -8,6 +8,10 @@ SPDX-License-Identifier: Unlicense
 
 ## Unreleased
 
+- Added opt-in, heap-free, one-shot AES-CCM authenticated encryption with
+  NIST SP 800-38C and RFC 3610 vectors, optional complete NIST CAVP
+  response-vector testing, in-place operation, authentication-failure wiping,
+  and focused API boundary tests.
 - Added opt-in, streaming AES-OFB support with NIST SP 800-38A vectors for
   AES-128/192/256, chunked and partial-buffer tests, and compile-time mode
   selection that keeps unused modes out of embedded builds. CTR is now the

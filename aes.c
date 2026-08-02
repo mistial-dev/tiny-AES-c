@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Unlicense
  *
 
-This is an implementation of the AES algorithm, specifically ECB, CTR, CBC and OFB modes.
+This is an implementation of the AES algorithm, specifically ECB, CTR, CBC, OFB,
+CCM, and GCM modes.
 Block size can be chosen in aes.h - available choices are AES128, AES192, AES256.
 
 The implementation is verified against the test vectors in:
@@ -74,7 +75,7 @@ NOTE:   String length must be evenly divisible by 16byte (str_len % 16 == 0)
 /*****************************************************************************/
 #if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1) || \
     (defined(CTR) && CTR == 1) || (defined(OFB) && OFB == 1) || \
-    (defined(GCM) && GCM == 1)
+    (defined(GCM) && GCM == 1) || (defined(CCM) && CCM == 1)
 // state - array holding the intermediate results during encryption/decryption.
 typedef uint8_t state_t[4][4];
 #endif
@@ -377,7 +378,7 @@ void AES_ctx_set_iv(struct AES_ctx* ctx, const uint8_t* iv)
 
 #if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1) || \
     (defined(CTR) && CTR == 1) || (defined(OFB) && OFB == 1) || \
-    (defined(GCM) && GCM == 1)
+    (defined(GCM) && GCM == 1) || (defined(CCM) && CCM == 1)
 
 // This function adds the round key to state.
 // The round key is added to the state by an XOR function.
@@ -1239,3 +1240,253 @@ void AES_GCM_clear(struct AES_GCM_ctx* ctx)
 }
 
 #endif // #if defined(GCM) && (GCM == 1)
+
+#if defined(CCM) && (CCM == 1)
+
+#define AES_CCM_MIN_NONCE_LEN 7u
+#define AES_CCM_MAX_NONCE_LEN 13u
+
+static int ccm_tag_length_is_valid(size_t tag_len)
+{
+  return tag_len >= 4 && tag_len <= AES_BLOCKLEN && (tag_len & 1u) == 0;
+}
+
+static unsigned ccm_length_field_size(size_t nonce_len)
+{
+  return (unsigned)(15u - nonce_len);
+}
+
+static int ccm_payload_length_is_valid(size_t nonce_len, size_t length)
+{
+  const unsigned q = ccm_length_field_size(nonce_len);
+
+  if (q == sizeof(uint64_t))
+    return 1;
+  return (uint64_t)length <= ((UINT64_C(1) << (8u * q)) - 1u);
+}
+
+static void ccm_store_length(uint8_t* dst, uint64_t value, unsigned length)
+{
+  while (length-- != 0)
+  {
+    dst[length] = (uint8_t)value;
+    value >>= 8;
+  }
+}
+
+static void ccm_mac_block(uint8_t* mac, const uint8_t* block,
+                          const uint8_t* round_key)
+{
+  unsigned i;
+
+  for (i = 0; i < AES_BLOCKLEN; ++i)
+    mac[i] ^= block[i];
+  Cipher((state_t*)mac, round_key);
+}
+
+static void ccm_mac_absorb(uint8_t* mac, uint8_t* block, size_t* used,
+                           const uint8_t* data, size_t length,
+                           const uint8_t* round_key)
+{
+  while (length != 0)
+  {
+    const size_t available = AES_BLOCKLEN - *used;
+    const size_t count = length < available ? length : available;
+    aes_copy_bytes(block + *used, data, count);
+    *used += count;
+    data += count;
+    length -= count;
+    if (*used == AES_BLOCKLEN)
+    {
+      ccm_mac_block(mac, block, round_key);
+      *used = 0;
+      memset(block, 0, AES_BLOCKLEN);
+    }
+  }
+}
+
+static void ccm_mac_pad(uint8_t* mac, uint8_t* block, size_t* used,
+                        const uint8_t* round_key)
+{
+  if (*used != 0)
+  {
+    memset(block + *used, 0, AES_BLOCKLEN - *used);
+    ccm_mac_block(mac, block, round_key);
+    *used = 0;
+    memset(block, 0, AES_BLOCKLEN);
+  }
+}
+
+static void ccm_make_counter(uint8_t* counter, const uint8_t* nonce,
+                             size_t nonce_len, uint64_t value)
+{
+  const unsigned q = ccm_length_field_size(nonce_len);
+
+  memset(counter, 0, AES_BLOCKLEN);
+  counter[0] = (uint8_t)(q - 1u);
+  aes_copy_bytes(counter + 1, nonce, nonce_len);
+  ccm_store_length(counter + 1 + nonce_len, value, q);
+}
+
+static void ccm_increment_counter(uint8_t* counter, unsigned q)
+{
+  unsigned i;
+
+  for (i = AES_BLOCKLEN; i > AES_BLOCKLEN - q; --i)
+  {
+    const unsigned offset = i - 1u;
+    if (++counter[offset] != 0)
+      break;
+  }
+}
+
+static void ccm_xor_block(uint8_t* dst, size_t length, uint8_t* counter,
+                          const uint8_t* round_key)
+{
+  uint8_t stream[AES_BLOCKLEN];
+  size_t i;
+
+  aes_copy_bytes(stream, counter, AES_BLOCKLEN);
+  Cipher((state_t*)stream, round_key);
+  for (i = 0; i < length; ++i)
+    dst[i] ^= stream[i];
+}
+
+static int ccm_crypt(const uint8_t* key, const uint8_t* nonce,
+                     size_t nonce_len, const uint8_t* aad, size_t aad_len,
+                     const uint8_t* input, size_t input_len, uint8_t* output,
+                     const uint8_t* tag, size_t tag_len, int decrypt)
+{
+  struct AES_ctx aes;
+  uint8_t mac[AES_BLOCKLEN] = { 0 };
+  uint8_t block[AES_BLOCKLEN] = { 0 };
+  uint8_t b0[AES_BLOCKLEN] = { 0 };
+  uint8_t counter[AES_BLOCKLEN];
+  uint8_t s0[AES_BLOCKLEN];
+  uint8_t full_tag[AES_BLOCKLEN];
+  size_t used = 0;
+  size_t offset = 0;
+  unsigned q;
+  unsigned i;
+
+  if (key == NULL || nonce == NULL ||
+      (aad_len != 0 && aad == NULL) ||
+      (input_len != 0 && (input == NULL || output == NULL)) ||
+      (decrypt && tag == NULL) || (!decrypt && tag == NULL) ||
+      nonce_len < AES_CCM_MIN_NONCE_LEN || nonce_len > AES_CCM_MAX_NONCE_LEN ||
+      !ccm_tag_length_is_valid(tag_len) ||
+      !ccm_payload_length_is_valid(nonce_len, input_len) ||
+      (uint64_t)aad_len > UINT64_MAX)
+    return AES_CCM_ERROR;
+
+  q = ccm_length_field_size(nonce_len);
+  b0[0] = (uint8_t)((aad_len != 0 ? 0x40u : 0u) |
+                    (uint8_t)(((tag_len - 2u) / 2u) << 3) |
+                    (uint8_t)(q - 1u));
+  aes_copy_bytes(b0 + 1, nonce, nonce_len);
+  ccm_store_length(b0 + 1 + nonce_len, (uint64_t)input_len, q);
+
+  AES_init_ctx(&aes, key);
+  ccm_mac_block(mac, b0, aes.RoundKey);
+
+  if (aad_len != 0)
+  {
+    uint8_t aad_header[10] = { 0 };
+    size_t header_len;
+
+    if (aad_len < 0xff00u)
+    {
+      header_len = 2;
+      ccm_store_length(aad_header, (uint64_t)aad_len, 2);
+    }
+    else if ((uint64_t)aad_len <= UINT32_MAX)
+    {
+      header_len = 6;
+      aad_header[0] = 0xff;
+      aad_header[1] = 0xfe;
+      ccm_store_length(aad_header + 2, (uint64_t)aad_len, 4);
+    }
+    else
+    {
+      header_len = 10;
+      aad_header[0] = 0xff;
+      aad_header[1] = 0xff;
+      ccm_store_length(aad_header + 2, (uint64_t)aad_len, 8);
+    }
+    ccm_mac_absorb(mac, block, &used, aad_header, header_len, aes.RoundKey);
+    ccm_mac_absorb(mac, block, &used, aad, aad_len, aes.RoundKey);
+    ccm_mac_pad(mac, block, &used, aes.RoundKey);
+  }
+
+  ccm_make_counter(counter, nonce, nonce_len, 0);
+  aes_copy_bytes(s0, counter, AES_BLOCKLEN);
+  Cipher((state_t*)s0, aes.RoundKey);
+  ccm_increment_counter(counter, q);
+
+  while (offset < input_len)
+  {
+    const size_t length = (input_len - offset < AES_BLOCKLEN) ?
+                          input_len - offset : AES_BLOCKLEN;
+    uint8_t plain[AES_BLOCKLEN] = { 0 };
+
+    if (decrypt)
+      aes_copy_bytes(plain, input + offset, length);
+    else
+      aes_copy_bytes(plain, input + offset, length);
+    if (decrypt)
+      ccm_xor_block(plain, length, counter, aes.RoundKey);
+    ccm_mac_absorb(mac, block, &used, plain, length, aes.RoundKey);
+    if (!decrypt)
+    {
+      aes_copy_bytes(output + offset, plain, length);
+      ccm_xor_block(output + offset, length, counter, aes.RoundKey);
+    }
+    else
+    {
+      aes_copy_bytes(output + offset, plain, length);
+    }
+    ccm_increment_counter(counter, q);
+    offset += length;
+  }
+  ccm_mac_pad(mac, block, &used, aes.RoundKey);
+
+  for (i = 0; i < AES_BLOCKLEN; ++i)
+    full_tag[i] = (uint8_t)(mac[i] ^ s0[i]);
+  if (decrypt)
+  {
+    uint8_t difference = 0;
+    for (i = 0; i < tag_len; ++i)
+      difference |= (uint8_t)(full_tag[i] ^ tag[i]);
+    if (difference != 0)
+    {
+      if (output != NULL)
+        memset(output, 0, input_len);
+      return AES_CCM_ERROR;
+    }
+  }
+  else
+  {
+    aes_copy_bytes((uint8_t*)tag, full_tag, tag_len);
+  }
+  return AES_CCM_SUCCESS;
+}
+
+int AES_CCM_encrypt(const uint8_t* key, const uint8_t* nonce,
+                    size_t nonce_len, const uint8_t* aad, size_t aad_len,
+                    const uint8_t* plaintext, size_t plaintext_len,
+                    uint8_t* ciphertext, uint8_t* tag, size_t tag_len)
+{
+  return ccm_crypt(key, nonce, nonce_len, aad, aad_len, plaintext,
+                   plaintext_len, ciphertext, tag, tag_len, 0);
+}
+
+int AES_CCM_decrypt(const uint8_t* key, const uint8_t* nonce,
+                    size_t nonce_len, const uint8_t* aad, size_t aad_len,
+                    const uint8_t* ciphertext, size_t ciphertext_len,
+                    const uint8_t* tag, size_t tag_len, uint8_t* plaintext)
+{
+  return ccm_crypt(key, nonce, nonce_len, aad, aad_len, ciphertext,
+                   ciphertext_len, plaintext, tag, tag_len, 1);
+}
+
+#endif // #if defined(CCM) && (CCM == 1)

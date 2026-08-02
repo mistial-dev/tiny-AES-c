@@ -15,6 +15,8 @@ option(TINY_AES_ENABLE_ECB "Enable ECB mode in the main library" OFF)
 option(TINY_AES_ENABLE_CTR "Enable CTR mode in the main library" ON)
 option(TINY_AES_ENABLE_OFB "Enable OFB mode in the main library" OFF)
 option(TINY_AES_ENABLE_GCM "Enable GCM mode in the main library" OFF)
+option(TINY_AES_ENABLE_CCM "Enable CCM mode in the main library" OFF)
+option(TINY_AES_CCM_CAVP "Run the complete CCM CAVP response corpus" OFF)
 option(TINY_AES_WIDE_OPS "Enable portable native-width block helpers" OFF)
 set(TINY_AES_SBOX_MODE "secure" CACHE STRING "S-box mode: secure, runtime, or fast")
 set_property(CACHE TINY_AES_SBOX_MODE PROPERTY STRINGS secure runtime fast)
@@ -81,10 +83,21 @@ if(TINY_AES_ENABLE_GCM)
 else()
     set(TINY_AES_GCM 0)
 endif()
+if(TINY_AES_ENABLE_CCM)
+    set(TINY_AES_CCM 1)
+else()
+    set(TINY_AES_CCM 0)
+endif()
+if(TINY_AES_CCM_CAVP)
+    set(TINY_AES_CCM_CAVP_DEFINITION 1)
+else()
+    set(TINY_AES_CCM_CAVP_DEFINITION 0)
+endif()
 
 tiny_aes_mode_definitions(tiny_aes_library_definitions
     ${TINY_AES_CBC} ${TINY_AES_ECB} ${TINY_AES_CTR} ${TINY_AES_OFB})
 list(APPEND tiny_aes_library_definitions GCM=${TINY_AES_GCM}
+    CCM=${TINY_AES_CCM}
     ${TINY_AES_GCM_GHASH_DEFINITION})
 
 add_library(tiny-aes STATIC aes.c)
@@ -102,7 +115,7 @@ if(TINY_AES_BUILD_TESTS)
 
     add_library(tiny-aes-munit OBJECT munit.c)
 
-    function(add_tiny_aes_test key mode gcm ghash_mode sbox_mode wide)
+    function(add_tiny_aes_test key mode gcm ccm ghash_mode sbox_mode wide)
         if(mode STREQUAL "none")
             set(cbc 0)
             set(ecb 0)
@@ -202,13 +215,15 @@ if(TINY_AES_BUILD_TESTS)
         endif()
 
         list(FIND _ghash_modes "${ghash_mode}" ghash_index)
-        set(test_name "${key}-${mode}-gcm${gcm}-ghash${ghash_index}-${sbox_mode}-wide${wide}")
+        set(test_name "${key}-${mode}-gcm${gcm}-ccm${ccm}-ghash${ghash_index}-${sbox_mode}-wide${wide}")
         add_library(test_core_${test_name} OBJECT aes.c test.c)
         target_include_directories(test_core_${test_name} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
         target_compile_definitions(test_core_${test_name} PRIVATE
-            CBC=${cbc} ECB=${ecb} CTR=${ctr} OFB=${ofb} GCM=${gcm}
+            CBC=${cbc} ECB=${ecb} CTR=${ctr} OFB=${ofb} GCM=${gcm} CCM=${ccm}
+            AES_CCM_CAVP=${TINY_AES_CCM_CAVP_DEFINITION}
             AES_GCM_GHASH_MODE=${ghash_index}
             ${key_definition} ${sbox_definition} AES_WIDE_OPS=${wide}
+            CCM_VECTOR_DIR=\"${CMAKE_CURRENT_LIST_DIR}/test_vectors/ccm\"
         )
 
         add_executable(test_aes_${test_name}
@@ -230,8 +245,15 @@ if(TINY_AES_BUILD_TESTS)
                 endif()
                 foreach(ghash_mode IN LISTS aes_test_ghash_modes)
                 foreach(sbox_mode IN LISTS aes_test_sbox_modes)
-                    add_tiny_aes_test(${key} ${mode} ${gcm} ${ghash_mode} ${sbox_mode} 0)
-                    add_tiny_aes_test(${key} ${mode} ${gcm} ${ghash_mode} ${sbox_mode} 1)
+                    if(mode STREQUAL "none")
+                        set(ccm_modes 0 1)
+                    else()
+                        set(ccm_modes 0)
+                    endif()
+                    foreach(ccm IN LISTS ccm_modes)
+                        add_tiny_aes_test(${key} ${mode} ${gcm} ${ccm} ${ghash_mode} ${sbox_mode} 0)
+                        add_tiny_aes_test(${key} ${mode} ${gcm} ${ccm} ${ghash_mode} ${sbox_mode} 1)
+                    endforeach()
                 endforeach()
                 endforeach()
             endforeach()
