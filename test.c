@@ -119,6 +119,29 @@ static MunitResult test_ctr(const MunitParameter params[], void* data)
 
   return MUNIT_OK;
 }
+
+static MunitResult test_ctr_unaligned(const MunitParameter params[], void* data)
+{
+  struct AES_ctx ctx;
+  uint8_t storage[sizeof(nist_plaintext) + 1];
+  uint8_t* buffer = storage + 1;
+
+  (void) params;
+  (void) data;
+
+  test_initialize_sbox();
+  AES_init_ctx_iv(&ctx, TEST_KEY, nist_ctr_iv);
+  memcpy(buffer, nist_plaintext, sizeof(nist_plaintext));
+  AES_CTR_xcrypt_buffer(&ctx, buffer, sizeof(nist_plaintext));
+  munit_assert_memory_equal(sizeof(nist_plaintext), buffer,
+                            TEST_CTR_CIPHERTEXT);
+
+  AES_ctx_set_iv(&ctx, nist_ctr_iv);
+  AES_CTR_xcrypt_buffer(&ctx, buffer, sizeof(nist_plaintext));
+  munit_assert_memory_equal(sizeof(nist_plaintext), buffer, nist_plaintext);
+
+  return MUNIT_OK;
+}
 #endif
 
 #if defined(GCM) && (GCM == 1)
@@ -240,6 +263,7 @@ static MunitTest test_suite_tests[] = {
 #endif
 #if defined(CTR) && (CTR == 1)
   { "/ctr", test_ctr, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+  { "/ctr-unaligned", test_ctr_unaligned, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #endif
 #if defined(GCM) && (GCM == 1)
   { "/gcm", test_gcm, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
