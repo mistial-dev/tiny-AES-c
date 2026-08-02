@@ -214,6 +214,7 @@ size_t ad_lens[2] = { aad_len, nonce_len };
 uint8_t v[AES_SIV_V_LEN];
 uint8_t ct[pt_len];
 
+/* v may alias pt when ct is distinct; v must be disjoint from ct. */
 if (AES_SIV_encrypt(key, ad, ad_lens, 2, pt, pt_len, v, ct) != AES_OK)
     return -1;
 /* Auth failure wipes the plaintext buffer (no large temp on MCU). */

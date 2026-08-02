@@ -260,14 +260,31 @@ void AES_ctx_clear(struct AES_ctx* ctx)
     (defined(EAX) && (EAX == 1)) || (defined(EAX_PRIME) && (EAX_PRIME == 1)) || \
     (defined(SIV) && (SIV == 1))
 /*
+ * Completely disjoint buffers (exact alias is not disjoint).
+ * Empty lengths are always treated as disjoint.
+ *
+ * Uses uintptr_t subtraction (not relational pointer compares or
+ * pa+len) for C portability across unrelated objects / MCU ABIs.
+ */
+static int aes_buffers_disjoint(const void* a, size_t a_len,
+                                const void* b, size_t b_len)
+{
+  const uintptr_t pa = (uintptr_t)a;
+  const uintptr_t pb = (uintptr_t)b;
+
+  if (a_len == 0 || b_len == 0)
+    return 1;
+  if (pa < pb)
+    return a_len <= (size_t)(pb - pa);
+  return b_len <= (size_t)(pa - pb);
+}
+
+/*
  * Buffer relationship for one-shot in/out pairs:
  *   exact alias (same pointer) — OK
  *   completely disjoint — OK
  *   partial overlap — not OK (AES_ERR)
  * Empty lengths are always OK.
- *
- * Uses uintptr_t subtraction (not relational pointer compares or
- * pa+len) for C portability across unrelated objects / MCU ABIs.
  */
 static int aes_buffers_ok(const void* a, size_t a_len,
                           const void* b, size_t b_len)
@@ -277,9 +294,7 @@ static int aes_buffers_ok(const void* a, size_t a_len,
 
   if (a_len == 0 || b_len == 0 || pa == pb)
     return 1;
-  if (pa < pb)
-    return a_len <= (size_t)(pb - pa);
-  return b_len <= (size_t)(pa - pb);
+  return aes_buffers_disjoint(a, a_len, b, b_len);
 }
 #endif
 
@@ -2479,7 +2494,12 @@ int AES_SIV_encrypt(const uint8_t* key,
 
   if (v == NULL)
     return AES_ERR;
-  /* Stage V so a caller-supplied v overlapping pt/ct cannot corrupt state. */
+  /*
+   * V is written after ciphertext. If they overlap, the post-encrypt copy
+   * would clobber ciphertext (exact or partial). Stage V for pt alias only.
+   */
+  if (!aes_buffers_disjoint(v, AES_SIV_V_LEN, ciphertext, plaintext_len))
+    return AES_ERR;
   status = siv_crypt(key, ad, ad_lens, ad_count, plaintext, plaintext_len,
                      ciphertext, local_v, 0);
   if (status == AES_OK)

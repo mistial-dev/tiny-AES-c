@@ -843,6 +843,22 @@ static MunitResult test_gcm_multi_key(const MunitParameter params[], void* data)
 #endif
 
 static MunitTest test_suite_tests[] = {
+  /*
+   * Mode suites that require AES_init_sbox() (runtime profile) are listed
+   * before /key-schedule. munit does not fork on Windows (MUNIT_NO_FORK), so
+   * an earlier test that initializes the process-global S-box would mask a
+   * missing AES_init_sbox() in a later test. On Unix, each test is forked and
+   * gets a fresh BSS, so the same bug fails there immediately.
+   */
+#if defined(SIV) && (SIV == 1)
+  { "/siv", test_siv, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+#endif
+#if defined(EAX) && (EAX == 1)
+  { "/eax", test_eax, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+#endif
+#if defined(EAX_PRIME) && (EAX_PRIME == 1)
+  { "/eax-prime", test_eax_prime, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+#endif
   { "/key-schedule", test_key_schedule, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
   { "/secure-zero-clear", test_secure_zero_and_clear, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #if defined(ECB) && (ECB == 1)
@@ -882,15 +898,6 @@ static MunitTest test_suite_tests[] = {
 #if defined(GCM_MULTI_KEY_TEST) && (GCM_MULTI_KEY_TEST == 1)
   { "/gcm-multi-key", test_gcm_multi_key, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #endif
-#endif
-#if defined(EAX) && (EAX == 1)
-  { "/eax", test_eax, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
-#endif
-#if defined(EAX_PRIME) && (EAX_PRIME == 1)
-  { "/eax-prime", test_eax_prime, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
-#endif
-#if defined(SIV) && (SIV == 1)
-  { "/siv", test_siv, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #endif
   { NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL }
 };

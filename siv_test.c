@@ -19,6 +19,17 @@
 
 #if defined(SIV) && (SIV == 1)
 
+#if AES_SBOX_MODE == AES_SBOX_MODE_RUNTIME
+static void siv_initialize_sbox(void)
+{
+  AES_init_sbox();
+}
+#else
+static void siv_initialize_sbox(void)
+{
+}
+#endif
+
 static int siv_hex_value(int c)
 {
   if (c >= '0' && c <= '9') return c - '0';
@@ -428,7 +439,7 @@ static MunitResult test_siv_api(const MunitParameter params[], void* data)
                                    buf + 1), ==, AES_ERR);
   munit_assert_memory_equal(sizeof(buf), buf, saved);
 
-  /* v may overlap plaintext (staged); still succeeds */
+  /* v may alias plaintext when ciphertext is distinct (staged); succeeds */
   memcpy(buf, pt, sizeof(pt));
   munit_assert_int(AES_SIV_encrypt(key, NULL, NULL, 0, buf, sizeof(pt), buf, ct),
                    ==, AES_OK);
@@ -440,6 +451,35 @@ static MunitResult test_siv_api(const MunitParameter params[], void* data)
     munit_assert_memory_equal(sizeof(pt), rec, pt);
   }
 
+  /* Exact v == ciphertext rejected; neither buffer written */
+  memcpy(buf, pt, sizeof(pt));
+  memcpy(saved, buf, sizeof(buf));
+  memcpy(ct, pt, sizeof(pt)); /* sentinel; must stay if encrypt is rejected */
+  {
+    uint8_t ct_saved[16];
+    memcpy(ct_saved, ct, sizeof(ct));
+    munit_assert_int(AES_SIV_encrypt(key, NULL, NULL, 0, pt, sizeof(pt), buf,
+                                     buf), ==, AES_ERR);
+    munit_assert_memory_equal(sizeof(buf), buf, saved);
+    munit_assert_memory_equal(sizeof(ct), ct, ct_saved);
+  }
+
+  /* Partial v/ciphertext overlap rejected; buffers unchanged */
+  memcpy(buf, pt, sizeof(pt));
+  memcpy(buf + 16, pt, sizeof(pt));
+  memcpy(saved, buf, sizeof(buf));
+  munit_assert_int(AES_SIV_encrypt(key, NULL, NULL, 0, pt, sizeof(pt), buf,
+                                   buf + 1), ==, AES_ERR);
+  munit_assert_memory_equal(sizeof(buf), buf, saved);
+
+  /* v fully after ciphertext (disjoint) is OK */
+  memcpy(buf, pt, sizeof(pt));
+  munit_assert_int(AES_SIV_encrypt(key, NULL, NULL, 0, pt, sizeof(pt), buf + 16,
+                                   buf), ==, AES_OK);
+  munit_assert_int(AES_SIV_decrypt(key, NULL, NULL, 0, buf + 16, buf,
+                                   sizeof(pt), ct), ==, AES_OK);
+  munit_assert_memory_equal(sizeof(pt), ct, pt);
+
   return MUNIT_OK;
 }
 
@@ -447,6 +487,8 @@ MunitResult test_siv(const MunitParameter params[], void* data)
 {
   (void) params;
   (void) data;
+
+  siv_initialize_sbox();
 
 #if !defined(AES192) && !defined(AES256)
   if (test_siv_rfc_a1(params, data) != MUNIT_OK)

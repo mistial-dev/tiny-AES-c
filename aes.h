@@ -381,11 +381,12 @@ int AES_EAX_PRIME_decrypt(const uint8_t* key, const uint8_t* cleartext,
 
 /*
  * One-shot SIV (RFC 5297). Associated data is a vector of 0..AES_SIV_MAX_AD
- * components (empty components are valid). v is the 16-byte synthetic IV
- * (staged on the stack so v may alias other buffers). Ciphertext length
- * equals plaintext length. pt/ct must be exact aliases or fully disjoint
- * (partial overlap returns AES_ERR). Decrypt writes candidate plaintext
- * then verifies; on authentication failure the output is wiped.
+ * components (empty components are valid). Ciphertext length equals
+ * plaintext length. pt/ct must be exact aliases or fully disjoint (partial
+ * overlap returns AES_ERR). v may alias plaintext when ciphertext is
+ * distinct, but must be disjoint from ciphertext (exact or partial overlap
+ * with ct returns AES_ERR). Decrypt writes candidate plaintext then
+ * verifies; on authentication failure the output is wiped.
  */
 int AES_SIV_encrypt(const uint8_t* key,
                     const uint8_t* const* ad, const size_t* ad_lens,
