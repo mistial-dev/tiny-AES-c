@@ -258,9 +258,9 @@ static int cavp_standard_case(enum cavp_mode mode, const char* file,
     struct AES_ctx ctx;
     AES_init_ctx_iv(&ctx, record->key, record->iv);
     if (encrypt)
-      AES_CBC_encrypt_buffer(&ctx, actual, input_len);
+      AES_CBC_encrypt(&ctx, actual, input_len);
     else
-      AES_CBC_decrypt_buffer(&ctx, actual, input_len);
+      AES_CBC_decrypt(&ctx, actual, input_len);
 #else
     free(actual);
     return 0;
@@ -271,7 +271,7 @@ static int cavp_standard_case(enum cavp_mode mode, const char* file,
 #if defined(OFB) && (OFB == 1)
     struct AES_ctx ctx;
     AES_init_ctx_iv(&ctx, record->key, record->iv);
-    AES_OFB_xcrypt_buffer(&ctx, actual, input_len);
+    AES_OFB_crypt(&ctx, actual, input_len);
 #else
     free(actual);
     return 0;

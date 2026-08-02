@@ -176,12 +176,30 @@ static MunitResult test_cbc(const MunitParameter params[], void* data)
   test_initialize_sbox();
   AES_init_ctx_iv(&ctx, TEST_KEY, nist_iv);
   memcpy(buffer, nist_plaintext, sizeof(buffer));
-  AES_CBC_encrypt_buffer(&ctx, buffer, sizeof(buffer));
+  munit_assert_int(AES_CBC_encrypt(&ctx, buffer, sizeof(buffer)), ==, AES_OK);
   munit_assert_memory_equal(sizeof(buffer), buffer, TEST_CBC_CIPHERTEXT);
 
   AES_ctx_set_iv(&ctx, nist_iv);
-  AES_CBC_decrypt_buffer(&ctx, buffer, sizeof(buffer));
+  munit_assert_int(AES_CBC_decrypt(&ctx, buffer, sizeof(buffer)), ==, AES_OK);
   munit_assert_memory_equal(sizeof(buffer), buffer, nist_plaintext);
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_cbc_alignment(const MunitParameter params[], void* data)
+{
+  struct AES_ctx ctx;
+  uint8_t buffer[AES_BLOCKLEN + 1];
+
+  (void) params;
+  (void) data;
+
+  test_initialize_sbox();
+  AES_init_ctx_iv(&ctx, TEST_KEY, nist_iv);
+  memset(buffer, 0x5a, sizeof(buffer));
+  munit_assert_int(AES_CBC_encrypt(&ctx, buffer, AES_BLOCKLEN + 1), ==, AES_ERR);
+  munit_assert_int(AES_CBC_decrypt(&ctx, buffer, 1), ==, AES_ERR);
+  munit_assert_int(AES_CBC_encrypt(&ctx, buffer, 0), ==, AES_OK);
 
   return MUNIT_OK;
 }
@@ -199,11 +217,11 @@ static MunitResult test_ctr(const MunitParameter params[], void* data)
   test_initialize_sbox();
   AES_init_ctx_iv(&ctx, TEST_KEY, nist_ctr_iv);
   memcpy(buffer, nist_plaintext, sizeof(buffer));
-  AES_CTR_xcrypt_buffer(&ctx, buffer, sizeof(buffer));
+  munit_assert_int(AES_CTR_crypt(&ctx, buffer, sizeof(buffer)), ==, AES_OK);
   munit_assert_memory_equal(sizeof(buffer), buffer, TEST_CTR_CIPHERTEXT);
 
   AES_ctx_set_iv(&ctx, nist_ctr_iv);
-  AES_CTR_xcrypt_buffer(&ctx, buffer, sizeof(buffer));
+  munit_assert_int(AES_CTR_crypt(&ctx, buffer, sizeof(buffer)), ==, AES_OK);
   munit_assert_memory_equal(sizeof(buffer), buffer, nist_plaintext);
 
   return MUNIT_OK;
@@ -221,13 +239,47 @@ static MunitResult test_ctr_unaligned(const MunitParameter params[], void* data)
   test_initialize_sbox();
   AES_init_ctx_iv(&ctx, TEST_KEY, nist_ctr_iv);
   memcpy(buffer, nist_plaintext, sizeof(nist_plaintext));
-  AES_CTR_xcrypt_buffer(&ctx, buffer, sizeof(nist_plaintext));
+  munit_assert_int(AES_CTR_crypt(&ctx, buffer, sizeof(nist_plaintext)), ==,
+                   AES_OK);
   munit_assert_memory_equal(sizeof(nist_plaintext), buffer,
                             TEST_CTR_CIPHERTEXT);
 
   AES_ctx_set_iv(&ctx, nist_ctr_iv);
-  AES_CTR_xcrypt_buffer(&ctx, buffer, sizeof(nist_plaintext));
+  munit_assert_int(AES_CTR_crypt(&ctx, buffer, sizeof(nist_plaintext)), ==,
+                   AES_OK);
   munit_assert_memory_equal(sizeof(nist_plaintext), buffer, nist_plaintext);
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_ctr_wrap(const MunitParameter params[], void* data)
+{
+  struct AES_ctx ctx;
+  uint8_t iv[AES_BLOCKLEN];
+  uint8_t saved_iv[AES_BLOCKLEN];
+  uint8_t buffer[AES_BLOCKLEN * 2];
+  uint8_t saved_buffer[AES_BLOCKLEN * 2];
+  uint8_t i;
+
+  (void) params;
+  (void) data;
+
+  test_initialize_sbox();
+  memset(iv, 0xff, sizeof(iv));
+  memset(buffer, 0x11, sizeof(buffer));
+  memcpy(saved_buffer, buffer, sizeof(buffer));
+  AES_init_ctx_iv(&ctx, TEST_KEY, iv);
+  memcpy(saved_iv, ctx.Iv, sizeof(saved_iv));
+
+  /* Two blocks from an all-0xff counter would wrap past 2^128. */
+  munit_assert_int(AES_CTR_crypt(&ctx, buffer, sizeof(buffer)), ==, AES_ERR);
+  munit_assert_memory_equal(sizeof(buffer), buffer, saved_buffer);
+  munit_assert_memory_equal(sizeof(saved_iv), ctx.Iv, saved_iv);
+
+  /* A single block at max counter is allowed; IV then wraps to zero. */
+  munit_assert_int(AES_CTR_crypt(&ctx, buffer, AES_BLOCKLEN), ==, AES_OK);
+  for (i = 0; i < AES_BLOCKLEN; ++i)
+    munit_assert_uint8(ctx.Iv[i], ==, 0);
 
   return MUNIT_OK;
 }
@@ -252,13 +304,13 @@ static MunitResult test_ofb(const MunitParameter params[], void* data)
 
   AES_init_ctx_iv(&ctx, TEST_KEY, nist_iv);
   memcpy(buffer, nist_plaintext, sizeof(buffer));
-  AES_OFB_xcrypt_buffer(&ctx, buffer, 0);
+  munit_assert_int(AES_OFB_crypt(&ctx, buffer, 0), ==, AES_OK);
   munit_assert_memory_equal(sizeof(buffer), buffer, nist_plaintext);
-  AES_OFB_xcrypt_buffer(&ctx, buffer, sizeof(buffer));
+  munit_assert_int(AES_OFB_crypt(&ctx, buffer, sizeof(buffer)), ==, AES_OK);
   munit_assert_memory_equal(sizeof(buffer), buffer, TEST_OFB_CIPHERTEXT);
 
   AES_ctx_set_iv(&ctx, nist_iv);
-  AES_OFB_xcrypt_buffer(&ctx, buffer, sizeof(buffer));
+  munit_assert_int(AES_OFB_crypt(&ctx, buffer, sizeof(buffer)), ==, AES_OK);
   munit_assert_memory_equal(sizeof(buffer), buffer, nist_plaintext);
 
   AES_ctx_set_iv(&ctx, nist_iv);
@@ -266,7 +318,8 @@ static MunitResult test_ofb(const MunitParameter params[], void* data)
   offset = 0;
   for (i = 0; i < sizeof(encrypt_chunks) / sizeof(encrypt_chunks[0]); ++i)
   {
-    AES_OFB_xcrypt_buffer(&ctx, buffer + offset, encrypt_chunks[i]);
+    munit_assert_int(AES_OFB_crypt(&ctx, buffer + offset, encrypt_chunks[i]),
+                     ==, AES_OK);
     offset += encrypt_chunks[i];
   }
   munit_assert_memory_equal(sizeof(buffer), buffer, TEST_OFB_CIPHERTEXT);
@@ -275,18 +328,19 @@ static MunitResult test_ofb(const MunitParameter params[], void* data)
   offset = 0;
   for (i = 0; i < sizeof(decrypt_chunks) / sizeof(decrypt_chunks[0]); ++i)
   {
-    AES_OFB_xcrypt_buffer(&ctx, buffer + offset, decrypt_chunks[i]);
+    munit_assert_int(AES_OFB_crypt(&ctx, buffer + offset, decrypt_chunks[i]),
+                     ==, AES_OK);
     offset += decrypt_chunks[i];
   }
   munit_assert_memory_equal(sizeof(buffer), buffer, nist_plaintext);
 
   AES_ctx_set_iv(&ctx, nist_iv);
   memcpy(unaligned, nist_plaintext, sizeof(nist_plaintext));
-  AES_OFB_xcrypt_buffer(&ctx, unaligned, 37);
+  munit_assert_int(AES_OFB_crypt(&ctx, unaligned, 37), ==, AES_OK);
   munit_assert_memory_equal(37, unaligned, TEST_OFB_CIPHERTEXT);
 
   AES_ctx_set_iv(&ctx, nist_iv);
-  AES_OFB_xcrypt_buffer(&ctx, unaligned, 37);
+  munit_assert_int(AES_OFB_crypt(&ctx, unaligned, 37), ==, AES_OK);
   munit_assert_memory_equal(37, unaligned, nist_plaintext);
 
   return MUNIT_OK;
@@ -653,10 +707,12 @@ static MunitTest test_suite_tests[] = {
 #endif
 #if defined(CBC) && (CBC == 1)
   { "/cbc", test_cbc, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+  { "/cbc-alignment", test_cbc_alignment, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #endif
 #if defined(CTR) && (CTR == 1)
   { "/ctr", test_ctr, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
   { "/ctr-unaligned", test_ctr_unaligned, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+  { "/ctr-wrap", test_ctr_wrap, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #endif
 #if defined(OFB) && (OFB == 1)
   { "/ofb", test_ofb, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },

@@ -60,6 +60,15 @@
   #error "AES_ZEROIZE must be 0 or 1"
 #endif
 
+/* When 1, classical buffer APIs reject NULL arguments (compiled out when 0). */
+#ifndef AES_STRICT
+  #define AES_STRICT 0
+#endif
+
+#if (AES_STRICT != 0) && (AES_STRICT != 1)
+  #error "AES_STRICT must be 0 or 1"
+#endif
+
 /* GCM GHASH implementation profiles. */
 #define AES_GCM_GHASH_MODE_AUTO       0
 #define AES_GCM_GHASH_MODE_BITWISE    1
@@ -172,19 +181,20 @@ void AES_ECB_decrypt(const struct AES_ctx* ctx, uint8_t* buf);
 #if defined(CBC) && (CBC == 1)
 /*
  * Buffer length must be a multiple of AES_BLOCKLEN (no padding is applied).
- * Set IV via AES_init_ctx_iv() or AES_ctx_set_iv(). Never reuse an IV with
- * the same key.
+ * Returns AES_ERR if length is not block-aligned. Set IV via AES_init_ctx_iv()
+ * or AES_ctx_set_iv(). Never reuse an IV with the same key.
  */
-void AES_CBC_encrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length);
-void AES_CBC_decrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length);
+int AES_CBC_encrypt(struct AES_ctx* ctx, uint8_t* buf, size_t length);
+int AES_CBC_decrypt(struct AES_ctx* ctx, uint8_t* buf, size_t length);
 #endif
 
 #if defined(CTR) && (CTR == 1)
 /*
  * Encrypt and decrypt are the same operation. The IV is incremented for every
- * block. Never reuse an IV with the same key.
+ * block. Returns AES_ERR if the request would wrap the 128-bit counter (buf
+ * and IV are left unchanged). Never reuse an IV with the same key.
  */
-void AES_CTR_xcrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length);
+int AES_CTR_crypt(struct AES_ctx* ctx, uint8_t* buf, size_t length);
 #endif
 
 #if defined(OFB) && (OFB == 1)
@@ -192,7 +202,7 @@ void AES_CTR_xcrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length);
  * Encrypt and decrypt are the same operation. Never reuse an IV with the same
  * key. OFB provides confidentiality only.
  */
-void AES_OFB_xcrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length);
+int AES_OFB_crypt(struct AES_ctx* ctx, uint8_t* buf, size_t length);
 #endif
 
 #if defined(GCM) && (GCM == 1)

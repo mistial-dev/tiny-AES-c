@@ -703,92 +703,167 @@ void AES_ECB_decrypt(const struct AES_ctx* ctx, uint8_t* buf)
 
 #if defined(CBC) && (CBC == 1)
 
-
-static void XorWithIv(uint8_t* buf, const uint8_t* Iv)
-{
-  aes_xor_block(buf, Iv);
-}
-
-void AES_CBC_encrypt_buffer(struct AES_ctx *ctx, uint8_t* buf, size_t length)
+int AES_CBC_encrypt(struct AES_ctx *ctx, uint8_t* buf, size_t length)
 {
   size_t i;
-  uint8_t *Iv = ctx->Iv;
+  uint8_t *Iv;
+
+#if AES_STRICT
+  if (ctx == NULL || (length != 0 && buf == NULL))
+    return AES_ERR;
+#endif
+  if ((length & (AES_BLOCKLEN - 1u)) != 0)
+    return AES_ERR;
+
+  Iv = ctx->Iv;
   for (i = 0; i < length; i += AES_BLOCKLEN)
   {
-    XorWithIv(buf, Iv);
+    aes_xor_block(buf, Iv);
     Cipher((state_t*)buf, ctx->RoundKey);
     Iv = buf;
     buf += AES_BLOCKLEN;
   }
   /* store Iv in ctx for next call */
   aes_copy_bytes(ctx->Iv, Iv, AES_BLOCKLEN);
+  return AES_OK;
 }
 
-void AES_CBC_decrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length)
+int AES_CBC_decrypt(struct AES_ctx* ctx, uint8_t* buf, size_t length)
 {
   size_t i;
   uint8_t storeNextIv[AES_BLOCKLEN];
+
+#if AES_STRICT
+  if (ctx == NULL || (length != 0 && buf == NULL))
+    return AES_ERR;
+#endif
+  if ((length & (AES_BLOCKLEN - 1u)) != 0)
+    return AES_ERR;
+
   for (i = 0; i < length; i += AES_BLOCKLEN)
   {
     aes_copy_bytes(storeNextIv, buf, AES_BLOCKLEN);
     InvCipher((state_t*)buf, ctx->RoundKey);
-    XorWithIv(buf, ctx->Iv);
+    aes_xor_block(buf, ctx->Iv);
     aes_copy_bytes(ctx->Iv, storeNextIv, AES_BLOCKLEN);
     buf += AES_BLOCKLEN;
   }
-
+  return AES_OK;
 }
 
-#endif // #if defined(CBC) && (CBC == 1)
+#endif /* CBC */
 
 
 
 #if defined(CTR) && (CTR == 1)
 
-/* Symmetrical operation: same function for encrypting as for decrypting. Note any IV/nonce should never be reused with the same key */
-void AES_CTR_xcrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length)
+/* Blocks of keystream remaining before the 128-bit counter wraps to zero. */
+static int ctr_blocks_until_wrap(const uint8_t iv[AES_BLOCKLEN], size_t needed)
 {
-  uint8_t buffer[AES_BLOCKLEN];
-  
-  size_t i;
-  int bi;
-  for (i = 0, bi = AES_BLOCKLEN; i < length; ++i, ++bi)
+  uint8_t remaining[AES_BLOCKLEN];
+  uint8_t bi;
+  size_t blocks = 0;
+  uint8_t carry;
+
+  /* remaining = 0x100...00 - iv, as a big-endian 128-bit distance to wrap. */
+  carry = 0;
+  for (bi = AES_BLOCKLEN; bi > 0; --bi)
   {
-    if (bi == AES_BLOCKLEN) /* we need to regen xor compliment in buffer */
+    const uint8_t idx = (uint8_t)(bi - 1u);
+    const unsigned diff = (unsigned)(0u - (unsigned)iv[idx] - (unsigned)carry);
+    remaining[idx] = (uint8_t)diff;
+    carry = (uint8_t)(iv[idx] != 0 || carry != 0 ? 1u : 0u);
+  }
+  /* If iv is all zero, distance is 2^128 blocks; any practical needed fits. */
+  {
+    uint8_t all_zero = 1;
+    for (bi = 0; bi < AES_BLOCKLEN; ++bi)
     {
-      
-      aes_copy_bytes(buffer, ctx->Iv, AES_BLOCKLEN);
-      Cipher((state_t*)buffer,ctx->RoundKey);
-
-      /* Increment Iv and handle overflow */
-      for (bi = (AES_BLOCKLEN - 1); bi >= 0; --bi)
+      if (iv[bi] != 0)
       {
-	/* inc will overflow */
-        if (ctx->Iv[bi] == 255)
-	{
-          ctx->Iv[bi] = 0;
-          continue;
-        } 
-        ctx->Iv[bi] += 1;
-        break;   
+        all_zero = 0;
+        break;
       }
-      bi = 0;
     }
+    if (all_zero)
+      return 1;
+  }
 
-    buf[i] = (buf[i] ^ buffer[bi]);
+  /* Compare needed (as block count) against remaining, without 128-bit math:
+   * if any of the high 12 bytes of remaining is non-zero, remaining is huge. */
+  for (bi = 0; bi < 12; ++bi)
+  {
+    if (remaining[bi] != 0)
+      return 1;
+  }
+  blocks = ((size_t)remaining[12] << 24) | ((size_t)remaining[13] << 16) |
+           ((size_t)remaining[14] << 8) | (size_t)remaining[15];
+  return needed <= blocks;
+}
+
+static void ctr_increment_iv(uint8_t iv[AES_BLOCKLEN])
+{
+  int8_t bi;
+
+  for (bi = (int8_t)(AES_BLOCKLEN - 1); bi >= 0; --bi)
+  {
+    if (iv[bi] != 0xffu)
+    {
+      ++iv[bi];
+      return;
+    }
+    iv[bi] = 0;
   }
 }
 
-#endif // #if defined(CTR) && (CTR == 1)
+int AES_CTR_crypt(struct AES_ctx* ctx, uint8_t* buf, size_t length)
+{
+  uint8_t buffer[AES_BLOCKLEN];
+  size_t i;
+  uint8_t bi;
+  size_t blocks_needed;
+
+#if AES_STRICT
+  if (ctx == NULL || (length != 0 && buf == NULL))
+    return AES_ERR;
+#endif
+  if (length == 0)
+    return AES_OK;
+
+  blocks_needed = (length + AES_BLOCKLEN - 1u) / AES_BLOCKLEN;
+  if (!ctr_blocks_until_wrap(ctx->Iv, blocks_needed))
+    return AES_ERR;
+
+  bi = AES_BLOCKLEN;
+  for (i = 0; i < length; ++i, ++bi)
+  {
+    if (bi == AES_BLOCKLEN)
+    {
+      aes_copy_bytes(buffer, ctx->Iv, AES_BLOCKLEN);
+      Cipher((state_t*)buffer, ctx->RoundKey);
+      ctr_increment_iv(ctx->Iv);
+      bi = 0;
+    }
+    buf[i] = (uint8_t)(buf[i] ^ buffer[bi]);
+  }
+  return AES_OK;
+}
+
+#endif /* CTR */
 
 
 #if defined(OFB) && (OFB == 1)
 
-/* Symmetrical operation: same function for encrypting as for decrypting. */
-void AES_OFB_xcrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length)
+int AES_OFB_crypt(struct AES_ctx* ctx, uint8_t* buf, size_t length)
 {
-  uint8_t pos = ctx->ofb_pos;
+  uint8_t pos;
 
+#if AES_STRICT
+  if (ctx == NULL || (length != 0 && buf == NULL))
+    return AES_ERR;
+#endif
+
+  pos = ctx->ofb_pos;
   while (length-- != 0)
   {
     if (pos == AES_BLOCKLEN)
@@ -796,14 +871,13 @@ void AES_OFB_xcrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length)
       Cipher((state_t*)ctx->Iv, ctx->RoundKey);
       pos = 0;
     }
-
     *buf++ ^= ctx->Iv[pos++];
   }
-
   ctx->ofb_pos = pos;
+  return AES_OK;
 }
 
-#endif // #if defined(OFB) && (OFB == 1)
+#endif /* OFB */
 
 
 #if defined(GCM) && (GCM == 1)
