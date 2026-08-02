@@ -193,12 +193,33 @@ This implementation is verified against the data in:
 
 The other appendices in the document are valuable for implementation details on e.g. padding, generation of IVs and nonces in CTR-mode etc.
 
+For CAVP testing of ECB, CBC, OFB, CFB, and CTR modes from SP 800-38A,
+see the [NIST CAVP block ciphers page](https://csrc.nist.gov/projects/cryptographic-algorithm-validation-program/block-ciphers).
+
 The GCM implementation is checked against compact samples from the NIST CAVP
 AES-GCM vectors in [SharedAES-GCM](https://github.com/mko-x/SharedAES-GCM/tree/master/Sources/gcm_test_vectors).
 
 ## Testing
 
-Unit tests use the vendored [µunit (munit)](https://nemequ.github.io/munit/) framework and exercise 1836 compile-time combinations of AES-128/192/256, every CBC/ECB/CTR/OFB mode subset including the no-mode configuration, CCM and GCM enabled and disabled, all S-box profiles, both wide-operation settings, and every portable GHASH profile. CCM-enabled builds are concentrated in the no-mode configuration so the expensive exact maximum-payload test is not repeated for unrelated mode combinations. Normal CCM tests run the NIST SP 800-38C examples and RFC 3610 examples, plus focused API, corruption, in-place, null-pointer, tag, nonce, AAD-boundary, and maximum-payload tests. The complete NIST CAVP response corpus is available as an opt-in test with `make AES_ENABLE_CCM=1 AES_CCM_CAVP=1 test` or `cmake -S . -B build -DTINY_AES_ENABLE_CCM=ON -DTINY_AES_CCM_CAVP=ON`. Each other enabled mode is checked against NIST vectors, including OFB chunking, partial and unaligned buffers, GCM encryption, decryption, tag rejection, streaming chunks, full-block updates, non-96-bit IV construction, and rejection of mixed encryption/decryption updates. CCM and GCM-disabled builds do not compile or allocate their state.
+Unit tests use the vendored [µunit (munit)](https://nemequ.github.io/munit/) framework and cover each mode in isolation, all AES key sizes, S-box profiles, GHASH profiles, and focused API boundaries. One all-enabled build checks integration without multiplying every mode subset. CCM and GCM are compiled out when disabled.
+
+Samples and focused tests run by default. Enable the complete vendored CAVP corpora with one switch:
+
+    make AES_CAVP=1 test
+
+Or with CMake:
+
+    cmake -S . -B build -DTINY_AES_CAVP=ON
+    cmake --build build
+    ctest --test-dir build --output-on-failure --parallel 4
+
+The CAVP run builds each mode independently and runs only that mode's corpus;
+it does not repeat the same corpus across every mode subset. Every key size,
+S-box profile, software GHASH profile, wide-operation path, and the hardware
+GHASH dispatch hook is exercised at least once. CTR remains covered by SP
+800-38A samples and focused tests because its counter-uniqueness requirement is
+configuration-dependent. These vectors provide informal validation, not a
+NIST certificate.
 
 Run the Makefile test suite with:
 

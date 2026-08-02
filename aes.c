@@ -75,7 +75,8 @@ NOTE:   String length must be evenly divisible by 16byte (str_len % 16 == 0)
 /*****************************************************************************/
 #if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1) || \
     (defined(CTR) && CTR == 1) || (defined(OFB) && OFB == 1) || \
-    (defined(GCM) && GCM == 1) || (defined(CCM) && CCM == 1)
+    (defined(GCM) && GCM == 1) || (defined(CCM) && CCM == 1) || \
+    (defined(AES_CAVP) && AES_CAVP == 1)
 // state - array holding the intermediate results during encryption/decryption.
 typedef uint8_t state_t[4][4];
 #endif
@@ -107,7 +108,8 @@ static const uint8_t sbox[256] = {
   0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16 };
 #endif
 
-#if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1)
+#if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1) || \
+    (defined(AES_CAVP) && AES_CAVP == 1)
 #if AES_SBOX_MODE == AES_SBOX_MODE_RUNTIME
 static uint8_t rsbox[256];
 #else
@@ -190,7 +192,8 @@ void AES_init_sbox(void)
                         sbox_rotate_left(inverse, 4) ^ 0x63);
   }
 
-#if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1)
+#if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1) || \
+    (defined(AES_CAVP) && AES_CAVP == 1)
   for (i = 0; i < 256; ++i)
     rsbox[sbox[i]] = (uint8_t)i;
 #endif
@@ -378,7 +381,8 @@ void AES_ctx_set_iv(struct AES_ctx* ctx, const uint8_t* iv)
 
 #if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1) || \
     (defined(CTR) && CTR == 1) || (defined(OFB) && OFB == 1) || \
-    (defined(GCM) && GCM == 1) || (defined(CCM) && CCM == 1)
+    (defined(GCM) && GCM == 1) || (defined(CCM) && CCM == 1) || \
+    (defined(AES_CAVP) && AES_CAVP == 1)
 
 // This function adds the round key to state.
 // The round key is added to the state by an XOR function.
@@ -478,7 +482,8 @@ static uint8_t Multiply(uint8_t x, uint8_t y)
 
 #endif
 
-#if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1)
+#if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1) || \
+    (defined(AES_CAVP) && AES_CAVP == 1)
 static uint8_t getSBoxInvert(uint8_t num)
 {
 #if AES_SBOX_MODE == AES_SBOX_MODE_FAST
@@ -591,7 +596,19 @@ static void Cipher(state_t* state, const uint8_t* RoundKey)
 
 #endif // forward AES cipher is used by an enabled mode
 
-#if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1)
+#if defined(AES_CAVP) && (AES_CAVP == 1)
+void AES_CAVP_encrypt_block(const uint8_t* key, uint8_t block[AES_BLOCKLEN])
+{
+  struct AES_ctx ctx;
+
+  AES_init_ctx(&ctx, key);
+  Cipher((state_t*)block, ctx.RoundKey);
+}
+
+#endif
+
+#if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1) || \
+    (defined(AES_CAVP) && AES_CAVP == 1)
 static void InvCipher(state_t* state, const uint8_t* RoundKey)
 {
   uint8_t round = 0;
@@ -616,6 +633,16 @@ static void InvCipher(state_t* state, const uint8_t* RoundKey)
 
 }
 #endif // #if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1)
+
+#if defined(AES_CAVP) && (AES_CAVP == 1)
+void AES_CAVP_decrypt_block(const uint8_t* key, uint8_t block[AES_BLOCKLEN])
+{
+  struct AES_ctx ctx;
+
+  AES_init_ctx(&ctx, key);
+  InvCipher((state_t*)block, ctx.RoundKey);
+}
+#endif
 
 /*****************************************************************************/
 /* Public functions:                                                         */

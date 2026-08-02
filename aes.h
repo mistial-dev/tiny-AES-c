@@ -60,6 +60,12 @@
   #error "AES_GCM_GHASH_MODE is invalid"
 #endif
 
+#if defined(AES_GCM_GHASH_HARDWARE_MULTIPLY)
+void AES_GCM_GHASH_HARDWARE_MULTIPLY(uint8_t* result,
+                                     const uint8_t* left,
+                                     const uint8_t* right);
+#endif
+
 /*
  * S-box implementation modes:
  *   AES_SBOX_MODE_CONSTANT_TIME - fixed-size masked scan (default)
@@ -119,6 +125,11 @@ struct AES_ctx
 };
 
 void AES_init_ctx(struct AES_ctx* ctx, const uint8_t* key);
+#if defined(AES_CAVP) && (AES_CAVP == 1)
+/* Test-only forward-cipher hook used by the AESAVS Monte Carlo harness. */
+void AES_CAVP_encrypt_block(const uint8_t* key, uint8_t block[AES_BLOCKLEN]);
+void AES_CAVP_decrypt_block(const uint8_t* key, uint8_t block[AES_BLOCKLEN]);
+#endif
 #if AES_SBOX_MODE == AES_SBOX_MODE_RUNTIME
 /* Must be called before AES_init_ctx(), AES_init_ctx_iv(), or encryption. */
 void AES_init_sbox(void);

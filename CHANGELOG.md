@@ -9,9 +9,11 @@ SPDX-License-Identifier: Unlicense
 ## Unreleased
 
 - Added opt-in, heap-free, one-shot AES-CCM authenticated encryption with
-  NIST SP 800-38C and RFC 3610 vectors, optional complete NIST CAVP
-  response-vector testing, in-place operation, authentication-failure wiping,
-  and focused API boundary tests.
+  NIST SP 800-38C and RFC 3610 vectors, plus unified opt-in CAVP response
+  validation for AES block modes, CCM, and GCM through the single `AES_CAVP`
+  switch. MCT intermediate records are checked, and the full corpus runs in
+  GitHub Actions for pushes and pull requests. Samples and focused API
+  boundary tests remain enabled by default.
 - Added opt-in, streaming AES-OFB support with NIST SP 800-38A vectors for
   AES-128/192/256, chunked and partial-buffer tests, and compile-time mode
   selection that keeps unused modes out of embedded builds. CTR is now the
@@ -28,8 +30,9 @@ SPDX-License-Identifier: Unlicense
   portable opt-in wide operations for embedded targets.
 - Made AES-128 the default only when no AES key-size macro is supplied, so
   AES192 and AES256 can be selected directly by the build.
-- Added an exhaustive 126-configuration Make/CMake test matrix covering key
-  sizes, mode combinations, S-box profiles, and wide-operation settings.
+- Reworked the Make/CMake test matrix to build modes independently, exercise
+  each implementation profile at least once, and avoid redundant mode-subset
+  combinations.
 - Reworked the unit tests around vendored µunit (munit), added cross-platform
   CMake/CTest support, and organized the AES-128/192/256 NIST SP 800-38A
   Appendix F vectors into a shared test-vector header.

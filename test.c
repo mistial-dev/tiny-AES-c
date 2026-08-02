@@ -38,8 +38,8 @@
 #define TEST_OFB_CIPHERTEXT aes128_ofb_ciphertext
 #endif
 
-#ifndef CCM_VECTOR_DIR
-#define CCM_VECTOR_DIR "test_vectors/ccm"
+#ifndef CAVP_VECTOR_DIR
+#define CAVP_VECTOR_DIR "test_vectors/cavp"
 #endif
 
 #if AES_SBOX_MODE == AES_SBOX_MODE_RUNTIME
@@ -51,6 +51,42 @@ static void test_initialize_sbox(void)
 static void test_initialize_sbox(void)
 {
 }
+#endif
+
+#if defined(GCM) && (GCM == 1) && \
+    AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_HARDWARE
+/* Test-only reference hook for validating the hardware dispatch path. */
+void AES_CAVP_GHASH_HARDWARE_MULTIPLY(uint8_t* result,
+                                      const uint8_t* left,
+                                      const uint8_t* right)
+{
+  uint8_t value[AES_BLOCKLEN];
+  uint8_t product[AES_BLOCKLEN] = { 0 };
+  unsigned byte;
+  unsigned bit;
+
+  memcpy(value, right, AES_BLOCKLEN);
+  for (byte = 0; byte < AES_BLOCKLEN; ++byte)
+  {
+    for (bit = 0; bit < 8; ++bit)
+    {
+      const uint8_t mask = (uint8_t)(0u - ((left[byte] >> (7u - bit)) & 1u));
+      const uint8_t lsb = (uint8_t)(0u - (value[AES_BLOCKLEN - 1u] & 1u));
+      unsigned i;
+
+      for (i = 0; i < AES_BLOCKLEN; ++i)
+        product[i] ^= (uint8_t)(value[i] & mask);
+      for (i = AES_BLOCKLEN - 1u; i > 0; --i)
+        value[i] = (uint8_t)((value[i] >> 1) | (value[i - 1u] << 7));
+      value[0] = (uint8_t)((value[0] >> 1) ^ (0xe1u & lsb));
+    }
+  }
+  memcpy(result, product, AES_BLOCKLEN);
+}
+#endif
+
+#if defined(AES_CAVP) && (AES_CAVP == 1)
+MunitResult test_cavp(const MunitParameter params[], void* data);
 #endif
 
 static MunitResult test_key_schedule(const MunitParameter params[], void* data)
@@ -466,188 +502,6 @@ static MunitResult test_ccm_api(const MunitParameter params[], void* data)
 
 #endif
 
-#if defined(AES_CCM_CAVP) && (AES_CCM_CAVP == 1)
-static size_t ccm_parse_hex(const char* line, uint8_t* output)
-{
-  const char* p = strchr(line, '=');
-  size_t length = 0;
-
-  if (p == NULL)
-    return 0;
-  ++p;
-  while (*p != '\0' && *p != '\n' && *p != '\r')
-  {
-    unsigned value;
-    if (!isxdigit((unsigned char)p[0]))
-    {
-      ++p;
-      continue;
-    }
-    value = (unsigned)(isdigit((unsigned char)p[0]) ? p[0] - '0' :
-                       tolower((unsigned char)p[0]) - 'a' + 10) << 4;
-    ++p;
-    while (*p != '\0' && !isxdigit((unsigned char)*p))
-      ++p;
-    if (*p == '\0' || *p == '\n' || *p == '\r')
-      break;
-    value |= (unsigned)(isdigit((unsigned char)*p) ? *p - '0' :
-                        tolower((unsigned char)*p) - 'a' + 10);
-    output[length++] = (uint8_t)value;
-    ++p;
-  }
-  return length;
-}
-
-static size_t ccm_parse_number(const char* line)
-{
-  const char* p = strchr(line, '=');
-  return p == NULL ? 0 : (size_t)strtoull(p + 1, NULL, 10);
-}
-
-static int ccm_run_cavp_case(const uint8_t* key, size_t key_len,
-                             const uint8_t* nonce, size_t nonce_len,
-                             const uint8_t* aad, size_t aad_len,
-                             const uint8_t* payload, size_t payload_len,
-                             const uint8_t* ct, size_t ct_len, size_t tag_len,
-                             int decrypt_vector, int expected_pass)
-{
-  uint8_t output[128] = { 0 };
-  uint8_t tag[16] = { 0 };
-  int result;
-
-  (void) key_len;
-  if (decrypt_vector)
-  {
-    result = AES_CCM_decrypt(key, nonce, nonce_len, aad, aad_len, ct,
-                             payload_len, ct + payload_len, tag_len, output);
-    if (!expected_pass)
-      return result == AES_CCM_ERROR;
-    return result == AES_CCM_SUCCESS &&
-           memcmp(output, payload, payload_len) == 0;
-  }
-
-  result = AES_CCM_encrypt(key, nonce, nonce_len, aad, aad_len, payload,
-                           payload_len, output, tag, tag_len);
-  return result == AES_CCM_SUCCESS &&
-         ct_len == payload_len + tag_len &&
-         memcmp(output, ct, payload_len) == 0 &&
-         memcmp(tag, ct + payload_len, tag_len) == 0;
-}
-
-static int ccm_run_cavp_file(const char* filename)
-{
-  FILE* file;
-  char line[256];
-  char path[256];
-  uint8_t key[32] = { 0 };
-  uint8_t nonce[13] = { 0 };
-  uint8_t aad[128] = { 0 };
-  uint8_t payload[128] = { 0 };
-  uint8_t ct[160] = { 0 };
-  size_t key_len = 0;
-  size_t nonce_len = 0;
-  size_t aad_len = 0;
-  size_t payload_len = 0;
-  size_t ct_len = 0;
-  size_t alen = 0;
-  size_t plen = 0;
-  size_t nlen = 0;
-  size_t tlen = 0;
-  int have_key = 0;
-  int have_nonce = 0;
-  int have_aad = 0;
-  int have_payload = 0;
-  int have_ct = 0;
-  int decrypt_vector = strstr(filename, "DVPT") != NULL;
-  int expected_pass = 1;
-
-  snprintf(path, sizeof(path), "%s/%s", CCM_VECTOR_DIR, filename);
-  file = fopen(path, "r");
-  if (file == NULL)
-    return 0;
-  while (fgets(line, sizeof(line), file) != NULL)
-  {
-    if (line[0] == '[')
-    {
-      const char* p;
-      p = strstr(line, "Alen ="); if (p != NULL) alen = ccm_parse_number(p);
-      p = strstr(line, "Plen ="); if (p != NULL) plen = ccm_parse_number(p);
-      p = strstr(line, "Nlen ="); if (p != NULL) nlen = ccm_parse_number(p);
-      p = strstr(line, "Tlen ="); if (p != NULL) tlen = ccm_parse_number(p);
-      continue;
-    }
-    if (strncmp(line, "Count =", 7) == 0)
-    {
-      have_aad = have_payload = have_ct = 0;
-      expected_pass = 1;
-    }
-    else if (strncmp(line, "Key =", 6) == 0)
-    {
-      key_len = ccm_parse_hex(line, key); have_key = 1;
-    }
-    else if (strncmp(line, "Nonce =", 8) == 0)
-    {
-      nonce_len = ccm_parse_hex(line, nonce); have_nonce = 1;
-    }
-    else if (strncmp(line, "Adata =", 7) == 0)
-    {
-      aad_len = ccm_parse_hex(line, aad); have_aad = 1;
-    }
-    else if (strncmp(line, "Payload =", 9) == 0)
-    {
-      payload_len = ccm_parse_hex(line, payload); have_payload = 1;
-    }
-    else if (strncmp(line, "CT =", 5) == 0)
-    {
-      ct_len = ccm_parse_hex(line, ct); have_ct = 1;
-    }
-    else if (strncmp(line, "Result = Fail", 14) == 0)
-    {
-      expected_pass = 0;
-    }
-    if (have_key && have_nonce && have_aad && have_payload && have_ct &&
-        (!decrypt_vector || strstr(line, "Result =") != NULL))
-    {
-      const size_t actual_aad_len = alen == 0 ? 0 : aad_len;
-      const size_t actual_payload_len = plen == 0 ? 0 : payload_len;
-      const size_t actual_nonce_len = nlen == 0 ? nonce_len : nlen / 8;
-      const size_t actual_tag_len = tlen == 0 ? ct_len - actual_payload_len : tlen / 8;
-      if (actual_aad_len > sizeof(aad) || actual_payload_len > sizeof(payload) ||
-          actual_nonce_len > sizeof(nonce) || ct_len > sizeof(ct) ||
-          !ccm_run_cavp_case(key, key_len, nonce, actual_nonce_len, aad,
-                             actual_aad_len, payload, actual_payload_len, ct,
-                             ct_len, actual_tag_len, decrypt_vector,
-                             expected_pass))
-      {
-        fclose(file);
-        return 0;
-      }
-      have_aad = have_payload = have_ct = 0;
-    }
-  }
-  fclose(file);
-  return 1;
-}
-
-static MunitResult test_ccm_cavp(const MunitParameter params[], void* data)
-{
-  static const char* const files[] = {
-    "DVPT128.rsp", "DVPT192.rsp", "DVPT256.rsp",
-    "VADT128.rsp", "VADT192.rsp", "VADT256.rsp",
-    "VNT128.rsp", "VNT192.rsp", "VNT256.rsp",
-    "VPT128.rsp", "VPT192.rsp", "VPT256.rsp",
-    "VTT128.rsp", "VTT192.rsp", "VTT256.rsp"
-  };
-  size_t i;
-
-  (void) params;
-  (void) data;
-  test_initialize_sbox();
-  for (i = 0; i < sizeof(files) / sizeof(files[0]); ++i)
-    munit_assert_true(ccm_run_cavp_file(files[i]));
-  return MUNIT_OK;
-}
-#endif
 #endif
 
 #if defined(GCM) && (GCM == 1)
@@ -775,13 +629,16 @@ static MunitTest test_suite_tests[] = {
 #if defined(OFB) && (OFB == 1)
   { "/ofb", test_ofb, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #endif
+#if defined(AES_CAVP) && (AES_CAVP == 1) && \
+    ((defined(ECB) && (ECB == 1)) || (defined(CBC) && (CBC == 1)) || \
+     (defined(OFB) && (OFB == 1)) || (defined(GCM) && (GCM == 1)) || \
+     (defined(CCM) && (CCM == 1)))
+  { "/cavp", test_cavp, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+#endif
 #if defined(CCM) && (CCM == 1)
 #if !defined(AES192) && !defined(AES256)
   { "/ccm", test_ccm, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
   { "/ccm-api", test_ccm_api, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
-#endif
-#if defined(AES_CCM_CAVP) && (AES_CCM_CAVP == 1)
-  { "/ccm-cavp", test_ccm_cavp, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #endif
 #endif
 #if defined(GCM) && (GCM == 1)
