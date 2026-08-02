@@ -80,6 +80,20 @@ This implementation is verified against the data in:
 
 The other appendices in the document are valuable for implementation details on e.g. padding, generation of IVs and nonces in CTR-mode etc.
 
+## Testing
+
+Unit tests use the vendored [µunit (munit)](https://nemequ.github.io/munit/) framework and cover the NIST SP 800-38A Appendix F ECB, CBC, and CTR vectors for AES-128, AES-192, and AES-256.
+
+Run the Makefile test suite with:
+
+    make test
+
+Or use CMake and CTest on platforms supported by CMake:
+
+    cmake -S . -B build
+    cmake --build build
+    ctest --test-dir build --output-on-failure
+
 
 A heartfelt thank-you to [all the nice people](https://github.com/kokke/tiny-AES-c/graphs/contributors) out there who have contributed to this project.
 
