@@ -7,9 +7,10 @@ CFLAGS ?= -Wall -Wextra -O2 -std=c99 -I.
 
 AES_SBOX_MODE ?= secure
 AES_WIDE_OPS ?= off
-AES_ENABLE_CBC ?= 1
-AES_ENABLE_ECB ?= 1
+AES_ENABLE_CBC ?= 0
+AES_ENABLE_ECB ?= 0
 AES_ENABLE_CTR ?= 1
+AES_ENABLE_OFB ?= 0
 AES_ENABLE_GCM ?= 0
 AES_GCM_GHASH_MODE ?= auto
 BENCHMARK_BYTES ?= 16384
@@ -34,7 +35,8 @@ else
 $(error AES_WIDE_OPS must be off or auto)
 endif
 
-MODE_DEFINITIONS = -DCBC=$(AES_ENABLE_CBC) -DECB=$(AES_ENABLE_ECB) -DCTR=$(AES_ENABLE_CTR) -DGCM=$(AES_ENABLE_GCM)
+MODE_DEFINITIONS = -DCBC=$(AES_ENABLE_CBC) -DECB=$(AES_ENABLE_ECB) \
+  -DCTR=$(AES_ENABLE_CTR) -DOFB=$(AES_ENABLE_OFB) -DGCM=$(AES_ENABLE_GCM)
 ifeq ($(AES_GCM_GHASH_MODE),auto)
 GHASH_DEFINITION = -DAES_GCM_GHASH_MODE=0
 GHASH_MODE = 0
@@ -70,9 +72,9 @@ size: aes.o
 
 benchmark: benchmark.c aes.c aes.h
 	mkdir -p $(TEST_BUILD_DIR)
-	$(CC) $(CFLAGS) -DGCM=1 -DAES128=1 -DAES_GCM_GHASH_MODE=$(GHASH_MODE) \
+	$(CC) $(CFLAGS) -DCBC=0 -DECB=0 -DCTR=0 -DOFB=0 -DGCM=1 -DAES128=1 -DAES_GCM_GHASH_MODE=$(GHASH_MODE) \
 		-c aes.c -o $(TEST_BUILD_DIR)/benchmark-aes.o
-	$(CC) $(CFLAGS) -DGCM=1 -DAES128=1 -DAES_GCM_GHASH_MODE=$(GHASH_MODE) \
+	$(CC) $(CFLAGS) -DCBC=0 -DECB=0 -DCTR=0 -DOFB=0 -DGCM=1 -DAES128=1 -DAES_GCM_GHASH_MODE=$(GHASH_MODE) \
 		-DBENCHMARK_BYTES=$(BENCHMARK_BYTES) -DBENCHMARK_ITERATIONS=$(BENCHMARK_ITERATIONS) \
 		benchmark.c $(TEST_BUILD_DIR)/benchmark-aes.o -o $(TEST_BUILD_DIR)/benchmark
 	$(TEST_BUILD_DIR)/benchmark
@@ -82,15 +84,24 @@ test:
 	mkdir -p $(TEST_BUILD_DIR); \
     $(CC) $(CFLAGS) -UGCM -UAES_GCM_GHASH_MODE -c munit.c -o $(TEST_BUILD_DIR)/munit.o; \
 	for key in 128 192 256; do \
-	  for mode in ecb cbc ctr ecb-cbc ecb-ctr cbc-ctr all; do \
+	  for mode in none ecb cbc ctr ofb ecb-cbc ecb-ctr ecb-ofb cbc-ctr cbc-ofb ctr-ofb ecb-cbc-ctr ecb-cbc-ofb ecb-ctr-ofb cbc-ctr-ofb all; do \
 	    case $$mode in \
-	      ecb) cbc=0; ecb=1; ctr=0 ;; \
-	      cbc) cbc=1; ecb=0; ctr=0 ;; \
-	      ctr) cbc=0; ecb=0; ctr=1 ;; \
-	      ecb-cbc) cbc=1; ecb=1; ctr=0 ;; \
-	      ecb-ctr) cbc=0; ecb=1; ctr=1 ;; \
-	      cbc-ctr) cbc=1; ecb=0; ctr=1 ;; \
-	      all) cbc=1; ecb=1; ctr=1 ;; \
+	      none) cbc=0; ecb=0; ctr=0; ofb=0 ;; \
+	      ecb) cbc=0; ecb=1; ctr=0; ofb=0 ;; \
+	      cbc) cbc=1; ecb=0; ctr=0; ofb=0 ;; \
+	      ctr) cbc=0; ecb=0; ctr=1; ofb=0 ;; \
+	      ofb) cbc=0; ecb=0; ctr=0; ofb=1 ;; \
+	      ecb-cbc) cbc=1; ecb=1; ctr=0; ofb=0 ;; \
+	      ecb-ctr) cbc=0; ecb=1; ctr=1; ofb=0 ;; \
+	      ecb-ofb) cbc=0; ecb=1; ctr=0; ofb=1 ;; \
+	      cbc-ctr) cbc=1; ecb=0; ctr=1; ofb=0 ;; \
+	      cbc-ofb) cbc=1; ecb=0; ctr=0; ofb=1 ;; \
+	      ctr-ofb) cbc=0; ecb=0; ctr=1; ofb=1 ;; \
+	      ecb-cbc-ctr) cbc=1; ecb=1; ctr=1; ofb=0 ;; \
+	      ecb-cbc-ofb) cbc=1; ecb=1; ctr=0; ofb=1 ;; \
+	      ecb-ctr-ofb) cbc=0; ecb=1; ctr=1; ofb=1 ;; \
+	      cbc-ctr-ofb) cbc=1; ecb=0; ctr=1; ofb=1 ;; \
+	      all) cbc=1; ecb=1; ctr=1; ofb=1 ;; \
 	    esac; \
     for gcm in 0 1; do \
       if [ $$gcm -eq 0 ]; then ghash_modes="0"; else ghash_modes="0 1 2 3 4"; fi; \
@@ -98,10 +109,10 @@ test:
       for sbox in 1 2 3; do \
         for wide in 0 1; do \
           name=$${key}-$${mode}-gcm$${gcm}-ghash$${ghash}-sbox$${sbox}-wide$${wide}; \
-          $(CC) $(CFLAGS) -DCBC=$$cbc -DECB=$$ecb -DCTR=$$ctr -DGCM=$$gcm \
+		  $(CC) $(CFLAGS) -DCBC=$$cbc -DECB=$$ecb -DCTR=$$ctr -DOFB=$$ofb -DGCM=$$gcm \
           -DAES$${key}=1 -DAES_SBOX_MODE=$$sbox -DAES_WIDE_OPS=$$wide -DAES_GCM_GHASH_MODE=$$ghash \
           -c aes.c -o $(TEST_BUILD_DIR)/aes-$${name}.o; \
-          $(CC) $(CFLAGS) -DCBC=$$cbc -DECB=$$ecb -DCTR=$$ctr -DGCM=$$gcm \
+		  $(CC) $(CFLAGS) -DCBC=$$cbc -DECB=$$ecb -DCTR=$$ctr -DOFB=$$ofb -DGCM=$$gcm \
           -DAES$${key}=1 -DAES_SBOX_MODE=$$sbox -DAES_WIDE_OPS=$$wide -DAES_GCM_GHASH_MODE=$$ghash \
           -c test.c -o $(TEST_BUILD_DIR)/test-$${name}.o; \
           $(CC) $(CFLAGS) -o $(TEST_BUILD_DIR)/test-$${name} \

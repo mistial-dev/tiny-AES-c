@@ -8,6 +8,10 @@ SPDX-License-Identifier: Unlicense
 
 ## Unreleased
 
+- Added opt-in, streaming AES-OFB support with NIST SP 800-38A vectors for
+  AES-128/192/256, chunked and partial-buffer tests, and compile-time mode
+  selection that keeps unused modes out of embedded builds. CTR is now the
+  only default mode; CBC, ECB, OFB, and GCM are opt-in.
 - Added opt-in, streaming AES-GCM support with arbitrary IV lengths, compact
   NIST CAVP vectors, authenticated tag verification, a block-wise update path,
   and configurable constant-time, wide, table-based, and hardware GHASH

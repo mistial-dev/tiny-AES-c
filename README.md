@@ -10,7 +10,7 @@ SPDX-License-Identifier: Unlicense
 This repository is a fork of [kokke/tiny-AES-c](https://github.com/kokke/tiny-AES-c).
 Fork-specific changes are documented in [CHANGELOG.md](CHANGELOG.md).
 
-This is a small and portable implementation of the AES [ECB](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Electronic_Codebook_.28ECB.29), [CTR](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Counter_.28CTR.29), [CBC](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Block_Chaining_.28CBC.29) and opt-in authenticated [GCM](https://en.wikipedia.org/wiki/Galois/Counter_Mode) modes written in C.
+This is a small and portable implementation of the AES [ECB](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Electronic_Codebook_.28ECB.29), [CTR](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Counter_.28CTR.29), [CBC](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Block_Chaining_.28CBC.29), [OFB](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Output_feedback_.28OFB.29), and opt-in authenticated [GCM](https://en.wikipedia.org/wiki/Galois/Counter_Mode) modes written in C.
 
 You can override the default key-size of 128 bit with 192 or 256 bit by defining the symbols AES192 or AES256 in [`aes.h`](aes.h).
 
@@ -34,6 +34,9 @@ void AES_CBC_decrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length);
 /* Same function for encrypting as for decrypting in CTR mode */
 void AES_CTR_xcrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length);
 
+/* Same function for encrypting as for decrypting in OFB mode */
+void AES_OFB_xcrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length);
+
 /* Enable GCM with GCM=1 and use this streaming API. */
 int AES_GCM_init(struct AES_GCM_ctx* ctx, const uint8_t* key,
                  const uint8_t* iv, size_t iv_len);
@@ -46,11 +49,22 @@ int AES_GCM_decrypt_finish(struct AES_GCM_ctx* ctx, const uint8_t* tag, size_t t
 
 Important notes: 
  * No padding is provided so for CBC and ECB all buffers should be multiples of 16 bytes. For padding [PKCS7](https://en.wikipedia.org/wiki/Padding_(cryptography)#PKCS7) is recommendable.
+ * OFB and CTR accept arbitrary buffer lengths and preserve their stream position across calls. OFB requires a unique IV for every message under the same key and provides confidentiality only; use GCM or another authenticator when integrity is required.
  * ECB mode is considered unsafe for most uses and is not implemented in streaming mode. If you need this mode, call the function for every block of 16 bytes you need encrypted. See [wikipedia's article on ECB](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Electronic_Codebook_(ECB)) for more details.
  * This library is designed for small code size and simplicity, intended for cases where small binary size, low memory footprint and portability is more important than high performance. If speed is a concern, you can try more complex libraries, e.g. [Mbed TLS](https://tls.mbed.org/), [OpenSSL](https://www.openssl.org/) etc.
  * This fork uses fixed-size masked scans for the AES S-boxes instead of secret-indexed table lookups, reducing cache-timing leakage. Constant-time behavior still depends on the compiler and target platform.
 
-You can choose to use any or all of the modes-of-operations, by defining the symbols CBC, CTR or ECB in [`aes.h`](aes.h) (read the comments for clarification).
+The default build enables only CTR. CBC, ECB, OFB, and GCM are opt-in so unused modes do not add their code or context state. Enable modes with `AES_ENABLE_CBC`, `AES_ENABLE_ECB`, `AES_ENABLE_OFB`, and `AES_ENABLE_GCM` in Make, or the corresponding `TINY_AES_ENABLE_*` CMake options. Direct users can define the `CBC`, `ECB`, `OFB`, and `GCM` symbols to `1` before including [`aes.h`](aes.h).
+
+For example, enable OFB without the other optional modes:
+
+    make AES_ENABLE_OFB=1
+    cmake -S . -B build -DTINY_AES_ENABLE_OFB=ON
+
+OFB is a synchronous stream mode: encryption and decryption use the same
+function, do not require padding, and can process data in arbitrary chunks.
+The IV is not secret, but it must never repeat with the same key. OFB does not
+authenticate ciphertext or protect against replay.
 
 C++ users should `#include` [aes.hpp](aes.hpp) instead of [aes.h](aes.h).
 
@@ -168,7 +182,7 @@ AES-GCM vectors in [SharedAES-GCM](https://github.com/mko-x/SharedAES-GCM/tree/m
 
 ## Testing
 
-Unit tests use the vendored [µunit (munit)](https://nemequ.github.io/munit/) framework and exercise 756 compile-time combinations of AES-128/192/256, every non-empty ECB/CBC/CTR mode combination, GCM enabled and disabled, all S-box profiles, both wide-operation settings, and every portable GHASH profile. Each enabled mode is checked against NIST vectors, including GCM encryption, decryption, tag rejection, streaming chunks, full-block updates, non-96-bit IV construction, and rejection of mixed encryption/decryption updates. GCM-disabled builds do not compile or allocate GCM state.
+Unit tests use the vendored [µunit (munit)](https://nemequ.github.io/munit/) framework and exercise 1728 compile-time combinations of AES-128/192/256, every CBC/ECB/CTR/OFB mode subset including the no-mode configuration, GCM enabled and disabled, all S-box profiles, both wide-operation settings, and every portable GHASH profile. Each enabled mode is checked against NIST vectors, including OFB chunking, partial and unaligned buffers, GCM encryption, decryption, tag rejection, streaming chunks, full-block updates, non-96-bit IV construction, and rejection of mixed encryption/decryption updates. GCM-disabled builds do not compile or allocate GCM state.
 
 Run the Makefile test suite with:
 

@@ -20,26 +20,19 @@
 #define TEST_ECB_CIPHERTEXT aes256_ecb_ciphertext
 #define TEST_CBC_CIPHERTEXT aes256_cbc_ciphertext
 #define TEST_CTR_CIPHERTEXT aes256_ctr_ciphertext
+#define TEST_OFB_CIPHERTEXT aes256_ofb_ciphertext
 #elif defined(AES192) && (AES192 == 1)
 #define TEST_KEY aes192_key
 #define TEST_ECB_CIPHERTEXT aes192_ecb_ciphertext
 #define TEST_CBC_CIPHERTEXT aes192_cbc_ciphertext
 #define TEST_CTR_CIPHERTEXT aes192_ctr_ciphertext
+#define TEST_OFB_CIPHERTEXT aes192_ofb_ciphertext
 #else
 #define TEST_KEY aes128_key
 #define TEST_ECB_CIPHERTEXT aes128_ecb_ciphertext
 #define TEST_CBC_CIPHERTEXT aes128_cbc_ciphertext
 #define TEST_CTR_CIPHERTEXT aes128_ctr_ciphertext
-#endif
-
-#if defined(GCM) && (GCM == 1)
-#if defined(AES256) && (AES256 == 1)
-#define TEST_GCM_VECTOR gcm_test_vectors[2]
-#elif defined(AES192) && (AES192 == 1)
-#define TEST_GCM_VECTOR gcm_test_vectors[1]
-#else
-#define TEST_GCM_VECTOR gcm_test_vectors[0]
-#endif
+#define TEST_OFB_CIPHERTEXT aes128_ofb_ciphertext
 #endif
 
 #if AES_SBOX_MODE == AES_SBOX_MODE_RUNTIME
@@ -51,6 +44,28 @@ static void test_initialize_sbox(void)
 static void test_initialize_sbox(void)
 {
 }
+#endif
+
+static MunitResult test_key_schedule(const MunitParameter params[], void* data)
+{
+  struct AES_ctx ctx;
+
+  (void) params;
+  (void) data;
+
+  test_initialize_sbox();
+  AES_init_ctx(&ctx, TEST_KEY);
+  return MUNIT_OK;
+}
+
+#if defined(GCM) && (GCM == 1)
+#if defined(AES256) && (AES256 == 1)
+#define TEST_GCM_VECTOR gcm_test_vectors[2]
+#elif defined(AES192) && (AES192 == 1)
+#define TEST_GCM_VECTOR gcm_test_vectors[1]
+#else
+#define TEST_GCM_VECTOR gcm_test_vectors[0]
+#endif
 #endif
 
 #if defined(ECB) && (ECB == 1)
@@ -139,6 +154,66 @@ static MunitResult test_ctr_unaligned(const MunitParameter params[], void* data)
   AES_ctx_set_iv(&ctx, nist_ctr_iv);
   AES_CTR_xcrypt_buffer(&ctx, buffer, sizeof(nist_plaintext));
   munit_assert_memory_equal(sizeof(nist_plaintext), buffer, nist_plaintext);
+
+  return MUNIT_OK;
+}
+#endif
+
+#if defined(OFB) && (OFB == 1)
+static MunitResult test_ofb(const MunitParameter params[], void* data)
+{
+  static const size_t encrypt_chunks[] = { 1, 15, 17, 31 };
+  static const size_t decrypt_chunks[] = { 7, 9, 16, 32 };
+  struct AES_ctx ctx;
+  uint8_t buffer[sizeof(nist_plaintext)];
+  uint8_t storage[sizeof(nist_plaintext) + 1];
+  uint8_t* unaligned = storage + 1;
+  size_t offset;
+  size_t i;
+
+  (void) params;
+  (void) data;
+
+  test_initialize_sbox();
+
+  AES_init_ctx_iv(&ctx, TEST_KEY, nist_iv);
+  memcpy(buffer, nist_plaintext, sizeof(buffer));
+  AES_OFB_xcrypt_buffer(&ctx, buffer, 0);
+  munit_assert_memory_equal(sizeof(buffer), buffer, nist_plaintext);
+  AES_OFB_xcrypt_buffer(&ctx, buffer, sizeof(buffer));
+  munit_assert_memory_equal(sizeof(buffer), buffer, TEST_OFB_CIPHERTEXT);
+
+  AES_ctx_set_iv(&ctx, nist_iv);
+  AES_OFB_xcrypt_buffer(&ctx, buffer, sizeof(buffer));
+  munit_assert_memory_equal(sizeof(buffer), buffer, nist_plaintext);
+
+  AES_ctx_set_iv(&ctx, nist_iv);
+  memcpy(buffer, nist_plaintext, sizeof(buffer));
+  offset = 0;
+  for (i = 0; i < sizeof(encrypt_chunks) / sizeof(encrypt_chunks[0]); ++i)
+  {
+    AES_OFB_xcrypt_buffer(&ctx, buffer + offset, encrypt_chunks[i]);
+    offset += encrypt_chunks[i];
+  }
+  munit_assert_memory_equal(sizeof(buffer), buffer, TEST_OFB_CIPHERTEXT);
+
+  AES_ctx_set_iv(&ctx, nist_iv);
+  offset = 0;
+  for (i = 0; i < sizeof(decrypt_chunks) / sizeof(decrypt_chunks[0]); ++i)
+  {
+    AES_OFB_xcrypt_buffer(&ctx, buffer + offset, decrypt_chunks[i]);
+    offset += decrypt_chunks[i];
+  }
+  munit_assert_memory_equal(sizeof(buffer), buffer, nist_plaintext);
+
+  AES_ctx_set_iv(&ctx, nist_iv);
+  memcpy(unaligned, nist_plaintext, sizeof(nist_plaintext));
+  AES_OFB_xcrypt_buffer(&ctx, unaligned, 37);
+  munit_assert_memory_equal(37, unaligned, TEST_OFB_CIPHERTEXT);
+
+  AES_ctx_set_iv(&ctx, nist_iv);
+  AES_OFB_xcrypt_buffer(&ctx, unaligned, 37);
+  munit_assert_memory_equal(37, unaligned, nist_plaintext);
 
   return MUNIT_OK;
 }
@@ -255,6 +330,7 @@ static MunitResult test_gcm_non96_iv(const MunitParameter params[], void* data)
 #endif
 
 static MunitTest test_suite_tests[] = {
+  { "/key-schedule", test_key_schedule, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #if defined(ECB) && (ECB == 1)
   { "/ecb", test_ecb, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #endif
@@ -264,6 +340,9 @@ static MunitTest test_suite_tests[] = {
 #if defined(CTR) && (CTR == 1)
   { "/ctr", test_ctr, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
   { "/ctr-unaligned", test_ctr_unaligned, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+#endif
+#if defined(OFB) && (OFB == 1)
+  { "/ofb", test_ofb, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #endif
 #if defined(GCM) && (GCM == 1)
   { "/gcm", test_gcm, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },

@@ -13,19 +13,24 @@
 //
 // CBC enables AES encryption in CBC-mode of operation.
 // CTR enables encryption in counter-mode.
-// ECB enables the basic ECB 16-byte block algorithm. All can be enabled simultaneously.
+// OFB enables encryption in output-feedback mode.
+// ECB enables the basic ECB 16-byte block algorithm. Modes can be enabled simultaneously.
 
 // The #ifndef-guard allows it to be configured before #include'ing or at compile time.
 #ifndef CBC
-  #define CBC 1
+  #define CBC 0
 #endif
 
 #ifndef ECB
-  #define ECB 1
+  #define ECB 0
 #endif
 
 #ifndef CTR
   #define CTR 1
+#endif
+
+#ifndef OFB
+  #define OFB 0
 #endif
 
 #ifndef GCM
@@ -98,8 +103,12 @@
 struct AES_ctx
 {
   uint8_t RoundKey[AES_keyExpSize];
-#if (defined(CBC) && (CBC == 1)) || (defined(CTR) && (CTR == 1))
+#if (defined(CBC) && (CBC == 1)) || (defined(CTR) && (CTR == 1)) || \
+    (defined(OFB) && (OFB == 1))
   uint8_t Iv[AES_BLOCKLEN];
+#if defined(OFB) && (OFB == 1)
+  uint8_t ofb_pos;
+#endif
 #endif
 };
 
@@ -108,7 +117,8 @@ void AES_init_ctx(struct AES_ctx* ctx, const uint8_t* key);
 /* Must be called before AES_init_ctx(), AES_init_ctx_iv(), or encryption. */
 void AES_init_sbox(void);
 #endif
-#if (defined(CBC) && (CBC == 1)) || (defined(CTR) && (CTR == 1))
+#if (defined(CBC) && (CBC == 1)) || (defined(CTR) && (CTR == 1)) || \
+    (defined(OFB) && (OFB == 1))
 void AES_init_ctx_iv(struct AES_ctx* ctx, const uint8_t* key, const uint8_t* iv);
 void AES_ctx_set_iv(struct AES_ctx* ctx, const uint8_t* iv);
 #endif
@@ -144,6 +154,16 @@ void AES_CBC_decrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length);
 void AES_CTR_xcrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length);
 
 #endif // #if defined(CTR) && (CTR == 1)
+
+
+#if defined(OFB) && (OFB == 1)
+
+// Same function for encrypting as for decrypting.
+// NOTES: you need to set IV in ctx with AES_init_ctx_iv() or AES_ctx_set_iv()
+//        no IV should ever be reused with the same key
+void AES_OFB_xcrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length);
+
+#endif // #if defined(OFB) && (OFB == 1)
 
 
 #if defined(GCM) && (GCM == 1)

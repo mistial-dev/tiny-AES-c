@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Unlicense
  *
 
-This is an implementation of the AES algorithm, specifically ECB, CTR and CBC mode.
+This is an implementation of the AES algorithm, specifically ECB, CTR, CBC and OFB modes.
 Block size can be chosen in aes.h - available choices are AES128, AES192, AES256.
 
 The implementation is verified against the test vectors in:
@@ -72,8 +72,12 @@ NOTE:   String length must be evenly divisible by 16byte (str_len % 16 == 0)
 /*****************************************************************************/
 /* Private variables:                                                        */
 /*****************************************************************************/
-// state - array holding the intermediate results during decryption.
+#if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1) || \
+    (defined(CTR) && CTR == 1) || (defined(OFB) && OFB == 1) || \
+    (defined(GCM) && GCM == 1)
+// state - array holding the intermediate results during encryption/decryption.
 typedef uint8_t state_t[4][4];
+#endif
 
 
 
@@ -223,6 +227,11 @@ static void aes_copy_bytes(uint8_t* dst, const uint8_t* src, size_t length)
     *dst++ = *src++;
 }
 
+static uint8_t xtime(uint8_t x)
+{
+  return ((x<<1) ^ (((x>>7) & 1) * 0x1b));
+}
+
 #if defined(CBC) && (CBC == 1)
 static void aes_xor_block(uint8_t* dst, const uint8_t* src)
 {
@@ -343,18 +352,32 @@ static void KeyExpansion(uint8_t* RoundKey, const uint8_t* Key)
 void AES_init_ctx(struct AES_ctx* ctx, const uint8_t* key)
 {
   KeyExpansion(ctx->RoundKey, key);
+#if defined(OFB) && (OFB == 1)
+  ctx->ofb_pos = AES_BLOCKLEN;
+#endif
 }
-#if (defined(CBC) && (CBC == 1)) || (defined(CTR) && (CTR == 1))
+#if (defined(CBC) && (CBC == 1)) || (defined(CTR) && (CTR == 1)) || \
+    (defined(OFB) && (OFB == 1))
 void AES_init_ctx_iv(struct AES_ctx* ctx, const uint8_t* key, const uint8_t* iv)
 {
   KeyExpansion(ctx->RoundKey, key);
   aes_copy_bytes(ctx->Iv, iv, AES_BLOCKLEN);
+#if defined(OFB) && (OFB == 1)
+  ctx->ofb_pos = AES_BLOCKLEN;
+#endif
 }
 void AES_ctx_set_iv(struct AES_ctx* ctx, const uint8_t* iv)
 {
   aes_copy_bytes(ctx->Iv, iv, AES_BLOCKLEN);
+#if defined(OFB) && (OFB == 1)
+  ctx->ofb_pos = AES_BLOCKLEN;
+#endif
 }
 #endif
+
+#if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1) || \
+    (defined(CTR) && CTR == 1) || (defined(OFB) && OFB == 1) || \
+    (defined(GCM) && GCM == 1)
 
 // This function adds the round key to state.
 // The round key is added to the state by an XOR function.
@@ -413,11 +436,6 @@ static void ShiftRows(state_t* state)
   (*state)[3][3] = (*state)[2][3];
   (*state)[2][3] = (*state)[1][3];
   (*state)[1][3] = temp;
-}
-
-static uint8_t xtime(uint8_t x)
-{
-  return ((x<<1) ^ (((x>>7) & 1) * 0x1b));
 }
 
 // MixColumns function mixes the columns of the state matrix
@@ -570,6 +588,8 @@ static void Cipher(state_t* state, const uint8_t* RoundKey)
   AddRoundKey(Nr, state, RoundKey);
 }
 
+#endif // forward AES cipher is used by an enabled mode
+
 #if (defined(CBC) && CBC == 1) || (defined(ECB) && ECB == 1)
 static void InvCipher(state_t* state, const uint8_t* RoundKey)
 {
@@ -700,6 +720,30 @@ void AES_CTR_xcrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length)
 }
 
 #endif // #if defined(CTR) && (CTR == 1)
+
+
+#if defined(OFB) && (OFB == 1)
+
+/* Symmetrical operation: same function for encrypting as for decrypting. */
+void AES_OFB_xcrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length)
+{
+  uint8_t pos = ctx->ofb_pos;
+
+  while (length-- != 0)
+  {
+    if (pos == AES_BLOCKLEN)
+    {
+      Cipher((state_t*)ctx->Iv, ctx->RoundKey);
+      pos = 0;
+    }
+
+    *buf++ ^= ctx->Iv[pos++];
+  }
+
+  ctx->ofb_pos = pos;
+}
+
+#endif // #if defined(OFB) && (OFB == 1)
 
 
 #if defined(GCM) && (GCM == 1)
