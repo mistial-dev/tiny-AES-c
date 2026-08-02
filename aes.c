@@ -40,13 +40,19 @@ NOTE:   String length must be evenly divisible by 16byte (str_len % 16 == 0)
 /*****************************************************************************/
 /* Includes:                                                                 */
 /*****************************************************************************/
-#include <string.h> // CBC mode, for memset
+#include <string.h> /* memcpy, memset */
 #include "aes.h"
+
+/*****************************************************************************/
+/* Integer width note (MCU / AVR-oriented):                                  */
+/*   Use size_t only for API buffer lengths that may exceed 255.             */
+/*   Prefer uint8_t for block offsets (0..15), rounds, and similar counters. */
+/*****************************************************************************/
 
 /*****************************************************************************/
 /* Defines:                                                                  */
 /*****************************************************************************/
-// The number of columns comprising a state in AES. This is a constant in AES. Value=4
+/* Number of columns in the AES state (constant for AES: 4). */
 #define Nb 4
 
 #if defined(AES256) && (AES256 == 1)
@@ -231,6 +237,22 @@ static void aes_copy_bytes(uint8_t* dst, const uint8_t* src, size_t length)
 #endif
   while (length-- != 0)
     *dst++ = *src++;
+}
+
+void AES_secure_zero(void* memory, size_t length)
+{
+  volatile uint8_t* bytes = (volatile uint8_t*)memory;
+  size_t i;
+
+  for (i = 0; i < length; ++i)
+    bytes[i] = 0;
+}
+
+void AES_ctx_clear(struct AES_ctx* ctx)
+{
+  if (ctx == NULL)
+    return;
+  AES_secure_zero(ctx, sizeof(*ctx));
 }
 
 static uint8_t xtime(uint8_t x)
@@ -607,6 +629,9 @@ void AES_CAVP_encrypt_block(const uint8_t* key, uint8_t block[AES_BLOCKLEN])
 
   AES_init_ctx(&ctx, key);
   Cipher((state_t*)block, ctx.RoundKey);
+#if AES_ZEROIZE
+  AES_ctx_clear(&ctx);
+#endif
 }
 
 #endif
@@ -645,6 +670,9 @@ void AES_CAVP_decrypt_block(const uint8_t* key, uint8_t block[AES_BLOCKLEN])
 
   AES_init_ctx(&ctx, key);
   InvCipher((state_t*)block, ctx.RoundKey);
+#if AES_ZEROIZE
+  AES_ctx_clear(&ctx);
+#endif
 }
 #endif
 
@@ -1103,7 +1131,7 @@ int AES_GCM_init(struct AES_GCM_ctx* ctx, const uint8_t* key,
 
   if (ctx == NULL || key == NULL || iv == NULL || iv_len == 0 ||
       (uint64_t)iv_len > UINT64_MAX / 8u)
-    return AES_GCM_ERROR;
+    return AES_ERR;
 
   AES_init_ctx(&ctx->aes, key);
   aes_copy_bytes(ctx->H, zero, AES_BLOCKLEN);
@@ -1122,7 +1150,7 @@ int AES_GCM_init(struct AES_GCM_ctx* ctx, const uint8_t* key,
   ctx->ghash_len = 0;
   ctx->phase = AES_GCM_PHASE_AAD;
   ctx->direction = AES_GCM_DIRECTION_NONE;
-  return AES_GCM_SUCCESS;
+  return AES_OK;
 }
 
 int AES_GCM_aad_update(struct AES_GCM_ctx* ctx, const uint8_t* aad,
@@ -1131,11 +1159,11 @@ int AES_GCM_aad_update(struct AES_GCM_ctx* ctx, const uint8_t* aad,
   if (ctx == NULL || ctx->phase != AES_GCM_PHASE_AAD ||
       (length != 0 && aad == NULL) ||
       !gcm_length_is_valid(ctx->aad_len, length, UINT64_MAX / 8u))
-    return AES_GCM_ERROR;
+    return AES_ERR;
 
   gcm_absorb(ctx, aad, length);
   ctx->aad_len += (uint64_t)length;
-  return AES_GCM_SUCCESS;
+  return AES_OK;
 }
 
 static int gcm_update(struct AES_GCM_ctx* ctx, uint8_t* buf, size_t length,
@@ -1149,10 +1177,10 @@ static int gcm_update(struct AES_GCM_ctx* ctx, uint8_t* buf, size_t length,
   if (ctx == NULL || ctx->phase == AES_GCM_PHASE_FINAL ||
       (length != 0 && buf == NULL) ||
       !gcm_length_is_valid(ctx->text_len, length, AES_GCM_MAX_TEXT_BYTES))
-    return AES_GCM_ERROR;
+    return AES_ERR;
   if (ctx->direction != AES_GCM_DIRECTION_NONE &&
       ctx->direction != direction)
-    return AES_GCM_ERROR;
+    return AES_ERR;
   if (ctx->direction == AES_GCM_DIRECTION_NONE)
     ctx->direction = direction;
 
@@ -1200,7 +1228,7 @@ static int gcm_update(struct AES_GCM_ctx* ctx, uint8_t* buf, size_t length,
     ++ctx->stream_pos;
   }
   ctx->text_len += (uint64_t)total_length;
-  return AES_GCM_SUCCESS;
+  return AES_OK;
 }
 
 int AES_GCM_encrypt_update(struct AES_GCM_ctx* ctx, uint8_t* buf,
@@ -1222,7 +1250,7 @@ int AES_GCM_encrypt_finish(struct AES_GCM_ctx* ctx, uint8_t* tag,
 
   if (ctx == NULL || tag == NULL || !gcm_tag_length_is_valid(tag_len) ||
       ctx->phase == AES_GCM_PHASE_FINAL)
-    return AES_GCM_ERROR;
+    return AES_ERR;
   if (ctx->phase == AES_GCM_PHASE_AAD)
   {
     gcm_pad_ghash(ctx);
@@ -1232,7 +1260,7 @@ int AES_GCM_encrypt_finish(struct AES_GCM_ctx* ctx, uint8_t* tag,
   gcm_make_tag(ctx, full_tag);
   aes_copy_bytes(tag, full_tag, tag_len);
   ctx->phase = AES_GCM_PHASE_FINAL;
-  return AES_GCM_SUCCESS;
+  return AES_OK;
 }
 
 int AES_GCM_decrypt_finish(struct AES_GCM_ctx* ctx, const uint8_t* tag,
@@ -1244,7 +1272,7 @@ int AES_GCM_decrypt_finish(struct AES_GCM_ctx* ctx, const uint8_t* tag,
 
   if (ctx == NULL || tag == NULL || !gcm_tag_length_is_valid(tag_len) ||
       ctx->phase == AES_GCM_PHASE_FINAL)
-    return AES_GCM_ERROR;
+    return AES_ERR;
   if (ctx->phase == AES_GCM_PHASE_AAD)
   {
     gcm_pad_ghash(ctx);
@@ -1255,19 +1283,14 @@ int AES_GCM_decrypt_finish(struct AES_GCM_ctx* ctx, const uint8_t* tag,
   for (i = 0; i < tag_len; ++i)
     difference |= (uint8_t)(expected[i] ^ tag[i]);
   ctx->phase = AES_GCM_PHASE_FINAL;
-  return difference == 0 ? AES_GCM_SUCCESS : AES_GCM_ERROR;
+  return difference == 0 ? AES_OK : AES_ERR;
 }
 
 void AES_GCM_clear(struct AES_GCM_ctx* ctx)
 {
-  volatile uint8_t* bytes;
-  size_t i;
-
   if (ctx == NULL)
     return;
-  bytes = (volatile uint8_t*)ctx;
-  for (i = 0; i < sizeof(*ctx); ++i)
-    bytes[i] = 0;
+  AES_secure_zero(ctx, sizeof(*ctx));
 }
 
 #endif // #if defined(GCM) && (GCM == 1)
@@ -1408,7 +1431,7 @@ static int ccm_crypt(const uint8_t* key, const uint8_t* nonce,
       !ccm_tag_length_is_valid(tag_len) ||
       !ccm_payload_length_is_valid(nonce_len, input_len) ||
       (uint64_t)aad_len > UINT64_MAX)
-    return AES_CCM_ERROR;
+    return AES_ERR;
 
   q = ccm_length_field_size(nonce_len);
   b0[0] = (uint8_t)((aad_len != 0 ? 0x40u : 0u) |
@@ -1492,14 +1515,32 @@ static int ccm_crypt(const uint8_t* key, const uint8_t* nonce,
     {
       if (output != NULL)
         memset(output, 0, input_len);
-      return AES_CCM_ERROR;
+#if AES_ZEROIZE
+      AES_ctx_clear(&aes);
+      AES_secure_zero(mac, sizeof(mac));
+      AES_secure_zero(block, sizeof(block));
+      AES_secure_zero(b0, sizeof(b0));
+      AES_secure_zero(counter, sizeof(counter));
+      AES_secure_zero(s0, sizeof(s0));
+      AES_secure_zero(full_tag, sizeof(full_tag));
+#endif
+      return AES_ERR;
     }
   }
   else
   {
     aes_copy_bytes((uint8_t*)tag, full_tag, tag_len);
   }
-  return AES_CCM_SUCCESS;
+#if AES_ZEROIZE
+  AES_ctx_clear(&aes);
+  AES_secure_zero(mac, sizeof(mac));
+  AES_secure_zero(block, sizeof(block));
+  AES_secure_zero(b0, sizeof(b0));
+  AES_secure_zero(counter, sizeof(counter));
+  AES_secure_zero(s0, sizeof(s0));
+  AES_secure_zero(full_tag, sizeof(full_tag));
+#endif
+  return AES_OK;
 }
 
 int AES_CCM_encrypt(const uint8_t* key, const uint8_t* nonce,
@@ -1704,15 +1745,6 @@ static void eax_ctr_xor(const struct AES_ctx* aes,
   }
 }
 
-static void eax_wipe(void* memory, size_t length)
-{
-  volatile uint8_t* bytes = (volatile uint8_t*)memory;
-  size_t i;
-
-  for (i = 0; i < length; ++i)
-    bytes[i] = 0;
-}
-
 #if defined(EAX) && (EAX == 1)
 
 static int eax_crypt(const uint8_t* key, const uint8_t* nonce,
@@ -1728,14 +1760,14 @@ static int eax_crypt(const uint8_t* key, const uint8_t* nonce,
   uint8_t d[AES_BLOCKLEN];
   uint8_t q[AES_BLOCKLEN];
   uint8_t difference = 0;
-  int status = AES_EAX_ERROR;
+  int status = AES_ERR;
   size_t i;
 
   if (key == NULL || (nonce_len != 0 && nonce == NULL) ||
       (aad_len != 0 && aad == NULL) ||
       (input_len != 0 && (input == NULL || output == NULL)) ||
       (tag_len != 0 && tag == NULL) || tag_len > AES_BLOCKLEN)
-    return AES_EAX_ERROR;
+    return AES_ERR;
 
   AES_init_ctx(&aes, key);
   eax_key_constants(&aes, d, q);
@@ -1752,7 +1784,7 @@ static int eax_crypt(const uint8_t* key, const uint8_t* nonce,
     if (difference == 0)
     {
       eax_ctr_xor(&aes, nonce_mac, input, output, input_len, 0);
-      status = AES_EAX_SUCCESS;
+      status = AES_OK;
     }
   }
   else
@@ -1762,16 +1794,18 @@ static int eax_crypt(const uint8_t* key, const uint8_t* nonce,
     for (i = 0; i < AES_BLOCKLEN; ++i)
       full_tag[i] = (uint8_t)(nonce_mac[i] ^ header_mac[i] ^ message_mac[i]);
     aes_copy_bytes(tag, full_tag, tag_len);
-    status = AES_EAX_SUCCESS;
+    status = AES_OK;
   }
 
-  eax_wipe(&aes, sizeof(aes));
-  eax_wipe(nonce_mac, sizeof(nonce_mac));
-  eax_wipe(header_mac, sizeof(header_mac));
-  eax_wipe(message_mac, sizeof(message_mac));
-  eax_wipe(full_tag, sizeof(full_tag));
-  eax_wipe(d, sizeof(d));
-  eax_wipe(q, sizeof(q));
+#if AES_ZEROIZE
+  AES_ctx_clear(&aes);
+  AES_secure_zero(nonce_mac, sizeof(nonce_mac));
+  AES_secure_zero(header_mac, sizeof(header_mac));
+  AES_secure_zero(message_mac, sizeof(message_mac));
+  AES_secure_zero(full_tag, sizeof(full_tag));
+  AES_secure_zero(d, sizeof(d));
+  AES_secure_zero(q, sizeof(q));
+#endif
   return status;
 }
 
@@ -1810,11 +1844,11 @@ static int eax_prime_crypt(const uint8_t* key, const uint8_t* cleartext,
   uint8_t full_tag[AES_BLOCKLEN];
   uint8_t difference = 0;
   size_t i;
-  int status = AES_EAX_PRIME_ERROR;
+  int status = AES_ERR;
 
   if (key == NULL || (cleartext_len != 0 && cleartext == NULL) ||
       (input_len != 0 && (input == NULL || output == NULL)) || tag == NULL)
-    return AES_EAX_PRIME_ERROR;
+    return AES_ERR;
 
   AES_init_ctx(&aes, key);
   eax_prime_key_constants(&aes, d, q);
@@ -1830,7 +1864,7 @@ static int eax_prime_crypt(const uint8_t* key, const uint8_t* cleartext,
     if (difference == 0)
     {
       eax_ctr_xor(&aes, nonce_mac, input, output, input_len, 1);
-      status = AES_EAX_PRIME_SUCCESS;
+      status = AES_OK;
     }
   }
   else
@@ -1841,15 +1875,17 @@ static int eax_prime_crypt(const uint8_t* key, const uint8_t* cleartext,
       full_tag[i] = (uint8_t)(nonce_mac[i] ^ message_mac[i]);
     for (i = 0; i < AES_EAX_PRIME_TAG_LEN; ++i)
       ((uint8_t*)tag)[i] = full_tag[AES_BLOCKLEN - 1u - i];
-    status = AES_EAX_PRIME_SUCCESS;
+    status = AES_OK;
   }
 
-  eax_wipe(&aes, sizeof(aes));
-  eax_wipe(d, sizeof(d));
-  eax_wipe(q, sizeof(q));
-  eax_wipe(nonce_mac, sizeof(nonce_mac));
-  eax_wipe(message_mac, sizeof(message_mac));
-  eax_wipe(full_tag, sizeof(full_tag));
+#if AES_ZEROIZE
+  AES_ctx_clear(&aes);
+  AES_secure_zero(d, sizeof(d));
+  AES_secure_zero(q, sizeof(q));
+  AES_secure_zero(nonce_mac, sizeof(nonce_mac));
+  AES_secure_zero(message_mac, sizeof(message_mac));
+  AES_secure_zero(full_tag, sizeof(full_tag));
+#endif
   return status;
 }
 

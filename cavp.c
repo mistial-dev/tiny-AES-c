@@ -622,8 +622,8 @@ static int cavp_run_ccm_case(const char* file,
                              record->payload_len,
                              record->ct + record->payload_len,
                              record->tag_len, output);
-    ok = record->expected_fail ? result == AES_CCM_ERROR :
-         result == AES_CCM_SUCCESS &&
+    ok = record->expected_fail ? result == AES_ERR :
+         result == AES_OK &&
          (record->payload_len == 0 ||
           memcmp(output, record->payload, record->payload_len) == 0);
   }
@@ -633,7 +633,7 @@ static int cavp_run_ccm_case(const char* file,
                              record->aad, record->aad_len, record->payload,
                              record->payload_len, output, tag,
                              record->tag_len);
-    ok = !record->expected_fail && result == AES_CCM_SUCCESS &&
+    ok = !record->expected_fail && result == AES_OK &&
          record->ct_len == record->payload_len + record->tag_len &&
          (record->payload_len == 0 ||
           memcmp(output, record->ct, record->payload_len) == 0) &&
@@ -794,17 +794,17 @@ static int cavp_run_gcm_file(const char* filename)
           memcpy(output, ct, ct_len);
         cavp_initialize_sbox();
         init_result = AES_GCM_init(&ctx, key, iv, iv_len);
-        aad_result = init_result == AES_GCM_SUCCESS ?
-                     AES_GCM_aad_update(&ctx, aad, aad_len) : AES_GCM_ERROR;
-        update_result = aad_result == AES_GCM_SUCCESS ?
-                        AES_GCM_decrypt_update(&ctx, output, ct_len) : AES_GCM_ERROR;
-        finish_result = update_result == AES_GCM_SUCCESS ?
-                        AES_GCM_decrypt_finish(&ctx, tag, tag_len) : AES_GCM_ERROR;
+        aad_result = init_result == AES_OK ?
+                     AES_GCM_aad_update(&ctx, aad, aad_len) : AES_ERR;
+        update_result = aad_result == AES_OK ?
+                        AES_GCM_decrypt_update(&ctx, output, ct_len) : AES_ERR;
+        finish_result = update_result == AES_OK ?
+                        AES_GCM_decrypt_finish(&ctx, tag, tag_len) : AES_ERR;
         result = finish_result;
         if (expected_fail)
-          ok = result == AES_GCM_ERROR;
+          ok = result == AES_ERR;
         else
-          ok = result == AES_GCM_SUCCESS && cavp_compare(filename, count, "PT", output, pt_len, pt, pt_len);
+          ok = result == AES_OK && cavp_compare(filename, count, "PT", output, pt_len, pt, pt_len);
         if (!ok)
         {
           fprintf(stderr, "CAVP GCM failure: %s Count=%lu result=%d stages=%d/%d/%d/%d expected=%s\n",
@@ -845,10 +845,10 @@ static int cavp_run_gcm_file(const char* filename)
           memcpy(output, pt, pt_len);
         cavp_initialize_sbox();
         result = AES_GCM_init(&ctx, key, iv, iv_len);
-        if (result == AES_GCM_SUCCESS) result = AES_GCM_aad_update(&ctx, aad, aad_len);
-        if (result == AES_GCM_SUCCESS) result = AES_GCM_encrypt_update(&ctx, output, pt_len);
-        if (result == AES_GCM_SUCCESS) result = AES_GCM_encrypt_finish(&ctx, actual_tag, tag_len);
-        ok = result == AES_GCM_SUCCESS && cavp_compare(filename, count, "CT", output, pt_len, ct, ct_len) &&
+        if (result == AES_OK) result = AES_GCM_aad_update(&ctx, aad, aad_len);
+        if (result == AES_OK) result = AES_GCM_encrypt_update(&ctx, output, pt_len);
+        if (result == AES_OK) result = AES_GCM_encrypt_finish(&ctx, actual_tag, tag_len);
+        ok = result == AES_OK && cavp_compare(filename, count, "CT", output, pt_len, ct, ct_len) &&
              cavp_compare(filename, count, "Tag", actual_tag, tag_len, tag, tag_len);
         if (!ok) fprintf(stderr, "CAVP GCM failure: %s Count=%lu\n", filename, (unsigned long)count);
         free(output);

@@ -139,12 +139,12 @@ static MunitResult test_eax_rfc(const MunitParameter params[], void* data)
                                         &cipher_len, &tag_len));
     munit_assert_int(AES_EAX_encrypt(key, nonce, nonce_len, aad, aad_len, msg,
                                      msg_len, output, generated, tag_len), ==,
-                     AES_EAX_SUCCESS);
+                     AES_OK);
     munit_assert_memory_equal(cipher_len, output, expected);
     munit_assert_memory_equal(tag_len, generated, tag);
     munit_assert_int(AES_EAX_decrypt(key, nonce, nonce_len, aad, aad_len,
                                      expected, cipher_len, tag, tag_len,
-                                     output), ==, AES_EAX_SUCCESS);
+                                     output), ==, AES_OK);
     munit_assert_memory_equal(msg_len, output, msg);
   }
 #else
@@ -230,15 +230,15 @@ static MunitResult test_eax_wycheproof(const MunitParameter params[], void* data
       {
         munit_assert_int(AES_EAX_encrypt(key, iv, iv_len, aad, aad_len, msg,
                                          msg_len, output, generated, tag_len),
-                         ==, AES_EAX_SUCCESS);
+                         ==, AES_OK);
         munit_assert_memory_equal(ct_len, output, ct);
         munit_assert_memory_equal(tag_len, generated, tag);
       }
       memset(output, 0xa5, sizeof(output));
       munit_assert_int(AES_EAX_decrypt(key, iv, iv_len, aad, aad_len, ct,
                                        ct_len, tag, tag_len, output), ==,
-                       strcmp(result, "valid") == 0 ? AES_EAX_SUCCESS :
-                                                       AES_EAX_ERROR);
+                       strcmp(result, "valid") == 0 ? AES_OK :
+                                                       AES_ERR);
       if (strcmp(result, "valid") == 0)
         munit_assert_memory_equal(msg_len, output, msg);
     }
@@ -274,18 +274,18 @@ static MunitResult test_eax_api(const MunitParameter params[], void* data)
   munit_assert_int(AES_EAX_encrypt(key, nonce, sizeof(nonce), aad,
                                    sizeof(aad), message, sizeof(message),
                                    ciphertext, tag, sizeof(tag)), ==,
-                   AES_EAX_SUCCESS);
+                   AES_OK);
 
   memcpy(bad, message, sizeof(message));
   munit_assert_int(AES_EAX_encrypt(key, nonce, sizeof(nonce), aad,
                                    sizeof(aad), bad, sizeof(bad), bad, tag,
-                                   sizeof(tag)), ==, AES_EAX_SUCCESS);
+                                   sizeof(tag)), ==, AES_OK);
   munit_assert_memory_equal(sizeof(ciphertext), bad, ciphertext);
 
   memcpy(bad, ciphertext, sizeof(ciphertext));
   munit_assert_int(AES_EAX_decrypt(key, nonce, sizeof(nonce), aad,
                                    sizeof(aad), bad, sizeof(bad), tag,
-                                   sizeof(tag), bad), ==, AES_EAX_SUCCESS);
+                                   sizeof(tag), bad), ==, AES_OK);
   munit_assert_memory_equal(sizeof(message), bad, message);
 
   memcpy(bad_tag, tag, sizeof(bad_tag));
@@ -295,49 +295,49 @@ static MunitResult test_eax_api(const MunitParameter params[], void* data)
   munit_assert_int(AES_EAX_decrypt(key, nonce, sizeof(nonce), aad,
                                    sizeof(aad), ciphertext, sizeof(ciphertext),
                    bad_tag, sizeof(bad_tag), bad), ==,
-                   AES_EAX_ERROR);
+                   AES_ERR);
   munit_assert_memory_equal(sizeof(bad), bad, untouched);
 
   bad[0] = ciphertext[0] ^ 1;
   memcpy(bad + 1, ciphertext + 1, sizeof(ciphertext) - 1);
   munit_assert_int(AES_EAX_decrypt(key, nonce, sizeof(nonce), aad,
                                    sizeof(aad), bad, sizeof(bad), tag,
-                                   sizeof(tag), NULL), ==, AES_EAX_ERROR);
+                                   sizeof(tag), NULL), ==, AES_ERR);
   munit_assert_int(AES_EAX_decrypt(key, nonce, sizeof(nonce), aad,
                                    sizeof(aad), ciphertext, sizeof(ciphertext),
-                                   tag, sizeof(tag), NULL), ==, AES_EAX_ERROR);
+                                   tag, sizeof(tag), NULL), ==, AES_ERR);
 
   bad[0] = aad[0] ^ 1;
   munit_assert_int(AES_EAX_decrypt(key, nonce, sizeof(nonce), bad,
                                    sizeof(aad), ciphertext, sizeof(ciphertext),
-                                   tag, sizeof(tag), bad), ==, AES_EAX_ERROR);
+                                   tag, sizeof(tag), bad), ==, AES_ERR);
   bad[0] = nonce[0] ^ 1;
   munit_assert_int(AES_EAX_decrypt(key, bad, sizeof(nonce), aad, sizeof(aad),
                                    ciphertext, sizeof(ciphertext), tag,
-                                   sizeof(tag), bad), ==, AES_EAX_ERROR);
+                                   sizeof(tag), bad), ==, AES_ERR);
 
   munit_assert_int(AES_EAX_encrypt(key, NULL, 0, NULL, 0, NULL, 0, NULL,
-                                   NULL, 0), ==, AES_EAX_SUCCESS);
+                                   NULL, 0), ==, AES_OK);
   munit_assert_int(AES_EAX_decrypt(key, NULL, 0, NULL, 0, NULL, 0, NULL, 0,
-                                   NULL), ==, AES_EAX_SUCCESS);
+                                   NULL), ==, AES_OK);
   munit_assert_int(AES_EAX_encrypt(key, nonce, sizeof(nonce), aad, sizeof(aad),
                                    message, sizeof(message), ciphertext, tag,
-                                   sizeof(tag) + 1), ==, AES_EAX_ERROR);
+                                   sizeof(tag) + 1), ==, AES_ERR);
   munit_assert_int(AES_EAX_encrypt(NULL, nonce, sizeof(nonce), aad, sizeof(aad),
                                    message, sizeof(message), ciphertext, tag,
-                                   sizeof(tag)), ==, AES_EAX_ERROR);
+                                   sizeof(tag)), ==, AES_ERR);
   munit_assert_int(AES_EAX_encrypt(key, NULL, 1, aad, sizeof(aad), message,
                                    sizeof(message), ciphertext, tag,
-                                   sizeof(tag)), ==, AES_EAX_ERROR);
+                                   sizeof(tag)), ==, AES_ERR);
   munit_assert_int(AES_EAX_encrypt(key, nonce, sizeof(nonce), NULL, 1, message,
                                    sizeof(message), ciphertext, tag,
-                                   sizeof(tag)), ==, AES_EAX_ERROR);
+                                   sizeof(tag)), ==, AES_ERR);
   munit_assert_int(AES_EAX_encrypt(key, nonce, sizeof(nonce), aad, sizeof(aad),
                                    message, sizeof(message), ciphertext, NULL,
-                                   sizeof(tag)), ==, AES_EAX_ERROR);
+                                   sizeof(tag)), ==, AES_ERR);
   munit_assert_int(AES_EAX_encrypt(key, nonce, sizeof(nonce), aad, sizeof(aad),
                                    message, sizeof(message), ciphertext,
-                                   empty_tag, 0), ==, AES_EAX_SUCCESS);
+                                   empty_tag, 0), ==, AES_OK);
   return MUNIT_OK;
 }
 
@@ -537,14 +537,14 @@ static MunitResult test_eax_prime_worked(const MunitParameter params[],
     munit_assert_int(AES_EAX_PRIME_encrypt(
                        keys[i], cleartext[i], cleartext_len[i], plaintext[i],
                        plaintext_len[i], ciphertext, tag), ==,
-                     AES_EAX_PRIME_SUCCESS);
+                     AES_OK);
     munit_assert_memory_equal(plaintext_len[i], ciphertext,
                               expected_ciphertext[i]);
     munit_assert_memory_equal(sizeof(tag), tag, expected_tag[i]);
     munit_assert_int(AES_EAX_PRIME_decrypt(
                        keys[i], cleartext[i], cleartext_len[i], ciphertext,
                        plaintext_len[i], tag, output), ==,
-                     AES_EAX_PRIME_SUCCESS);
+                     AES_OK);
     munit_assert_memory_equal(plaintext_len[i], output, plaintext[i]);
   }
 
@@ -560,11 +560,11 @@ static MunitResult test_eax_prime_worked(const MunitParameter params[],
     munit_assert_int(AES_EAX_PRIME_encrypt(
                        keys[0], boundary_cleartext, cleartext_len,
                        boundary_plaintext, plaintext_len, boundary_ciphertext,
-                       boundary_tag), ==, AES_EAX_PRIME_SUCCESS);
+                       boundary_tag), ==, AES_OK);
     munit_assert_int(AES_EAX_PRIME_decrypt(
                        keys[0], boundary_cleartext, cleartext_len,
                        boundary_ciphertext, plaintext_len, boundary_tag,
-                       boundary_output), ==, AES_EAX_PRIME_SUCCESS);
+                       boundary_output), ==, AES_OK);
     munit_assert_memory_equal(plaintext_len, boundary_output,
                               boundary_plaintext);
     memcpy(boundary_output, boundary_plaintext, plaintext_len);
@@ -572,7 +572,7 @@ static MunitResult test_eax_prime_worked(const MunitParameter params[],
     munit_assert_int(AES_EAX_PRIME_decrypt(
                        keys[0], boundary_cleartext, cleartext_len,
                        boundary_ciphertext, plaintext_len, boundary_tag,
-                       boundary_output), ==, AES_EAX_PRIME_ERROR);
+                       boundary_output), ==, AES_ERR);
     for (j = 0; j < plaintext_len; ++j)
       munit_assert_uint(boundary_output[j], ==, boundary_plaintext[j]);
     boundary_tag[0] ^= 1;
@@ -584,7 +584,7 @@ static MunitResult test_eax_prime_worked(const MunitParameter params[],
       munit_assert_int(AES_EAX_PRIME_decrypt(
                          keys[0], boundary_cleartext, cleartext_len,
                          boundary_ciphertext, plaintext_len, boundary_tag,
-                         boundary_output), ==, AES_EAX_PRIME_ERROR);
+                         boundary_output), ==, AES_ERR);
       for (j = 0; j < plaintext_len; ++j)
         munit_assert_uint(boundary_output[j], ==, boundary_plaintext[j]);
       boundary_ciphertext[plaintext_len - 1] ^= 1;
@@ -596,7 +596,7 @@ static MunitResult test_eax_prime_worked(const MunitParameter params[],
       munit_assert_int(AES_EAX_PRIME_decrypt(
                          keys[0], boundary_cleartext, cleartext_len,
                          boundary_ciphertext, plaintext_len, boundary_tag,
-                         boundary_output), ==, AES_EAX_PRIME_ERROR);
+                         boundary_output), ==, AES_ERR);
       for (j = 0; j < plaintext_len; ++j)
         munit_assert_uint(boundary_output[j], ==, boundary_plaintext[j]);
       boundary_cleartext[cleartext_len - 1] ^= 1;
@@ -644,7 +644,7 @@ static MunitResult test_eax_prime_c12_22(const MunitParameter params[],
   munit_assert_int(AES_EAX_PRIME_encrypt(
                      key, cleartext, sizeof(cleartext), plaintext,
                      sizeof(plaintext), ciphertext, tag), ==,
-                   AES_EAX_PRIME_SUCCESS);
+                   AES_OK);
   munit_assert_memory_equal(sizeof(expected_ciphertext), ciphertext,
                             expected_ciphertext);
   munit_assert_memory_equal(sizeof(expected_tag), tag, expected_tag);
@@ -652,20 +652,20 @@ static MunitResult test_eax_prime_c12_22(const MunitParameter params[],
   munit_assert_int(AES_EAX_PRIME_decrypt(
                      key, cleartext, sizeof(cleartext), ciphertext,
                      sizeof(ciphertext), tag, decrypted), ==,
-                   AES_EAX_PRIME_SUCCESS);
+                   AES_OK);
   munit_assert_memory_equal(sizeof(plaintext), decrypted, plaintext);
 
   memcpy(decrypted, plaintext, sizeof(plaintext));
   munit_assert_int(AES_EAX_PRIME_encrypt(
                      key, cleartext, sizeof(cleartext), decrypted,
                      sizeof(decrypted), decrypted, tag), ==,
-                   AES_EAX_PRIME_SUCCESS);
+                   AES_OK);
   munit_assert_memory_equal(sizeof(expected_ciphertext), decrypted,
                             expected_ciphertext);
   munit_assert_int(AES_EAX_PRIME_decrypt(
                      key, cleartext, sizeof(cleartext), decrypted,
                      sizeof(decrypted), tag, decrypted), ==,
-                   AES_EAX_PRIME_SUCCESS);
+                   AES_OK);
   munit_assert_memory_equal(sizeof(plaintext), decrypted, plaintext);
 
   memcpy(bad_tag, tag, sizeof(bad_tag));
@@ -674,7 +674,7 @@ static MunitResult test_eax_prime_c12_22(const MunitParameter params[],
   munit_assert_int(AES_EAX_PRIME_decrypt(
                      key, cleartext, sizeof(cleartext), ciphertext,
                      sizeof(ciphertext), bad_tag, decrypted), ==,
-                   AES_EAX_PRIME_ERROR);
+                   AES_ERR);
   for (size_t i = 0; i < sizeof(decrypted); ++i)
     munit_assert_uint(decrypted[i], ==, 0xa5);
 
@@ -683,7 +683,7 @@ static MunitResult test_eax_prime_c12_22(const MunitParameter params[],
   munit_assert_int(AES_EAX_PRIME_decrypt(
                      key, cleartext, sizeof(cleartext), ciphertext,
                      sizeof(ciphertext), tag, decrypted), ==,
-                   AES_EAX_PRIME_ERROR);
+                   AES_ERR);
   for (size_t i = 0; i < sizeof(decrypted); ++i)
     munit_assert_uint(decrypted[i], ==, 0xa5);
   ciphertext[0] ^= 1;
@@ -694,34 +694,34 @@ static MunitResult test_eax_prime_c12_22(const MunitParameter params[],
   munit_assert_int(AES_EAX_PRIME_decrypt(
                      key, bad_cleartext, sizeof(bad_cleartext), ciphertext,
                      sizeof(ciphertext), tag, decrypted), ==,
-                   AES_EAX_PRIME_ERROR);
+                   AES_ERR);
   for (size_t i = 0; i < sizeof(decrypted); ++i)
     munit_assert_uint(decrypted[i], ==, 0xa5);
 
   munit_assert_int(AES_EAX_PRIME_encrypt(
                      key, cleartext, sizeof(cleartext), plaintext,
                      sizeof(plaintext), ciphertext, NULL), ==,
-                   AES_EAX_PRIME_ERROR);
+                   AES_ERR);
   munit_assert_int(AES_EAX_PRIME_decrypt(
                      key, cleartext, sizeof(cleartext), ciphertext,
                      sizeof(ciphertext), NULL, decrypted), ==,
-                   AES_EAX_PRIME_ERROR);
+                   AES_ERR);
   munit_assert_int(AES_EAX_PRIME_encrypt(
                      NULL, cleartext, sizeof(cleartext), plaintext,
                      sizeof(plaintext), ciphertext, tag), ==,
-                   AES_EAX_PRIME_ERROR);
+                   AES_ERR);
   munit_assert_int(AES_EAX_PRIME_encrypt(
                      key, NULL, 1, plaintext, sizeof(plaintext), ciphertext,
-                     tag), ==, AES_EAX_PRIME_ERROR);
+                     tag), ==, AES_ERR);
   munit_assert_int(AES_EAX_PRIME_encrypt(
                      key, cleartext, sizeof(cleartext), NULL, 1, ciphertext,
-                     tag), ==, AES_EAX_PRIME_ERROR);
+                     tag), ==, AES_ERR);
   munit_assert_int(AES_EAX_PRIME_encrypt(
                      key, NULL, 0, NULL, 0, NULL, tag), ==,
-                   AES_EAX_PRIME_SUCCESS);
+                   AES_OK);
   munit_assert_int(AES_EAX_PRIME_decrypt(
                      key, NULL, 0, NULL, 0, tag, NULL), ==,
-                   AES_EAX_PRIME_SUCCESS);
+                   AES_OK);
   return MUNIT_OK;
 }
 

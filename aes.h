@@ -9,17 +9,16 @@
 #include <stdint.h>
 #include <stddef.h>
 
-// #define the macros below to 1/0 to enable/disable the mode of operation.
-//
-// CBC enables AES encryption in CBC-mode of operation.
-// CTR enables encryption in counter-mode.
-// OFB enables encryption in output-feedback mode.
-// CCM enables one-shot authenticated encryption in CCM mode.
-// ECB enables the basic ECB 16-byte block algorithm. Modes can be enabled simultaneously.
-// GCM enables streaming authenticated encryption in GCM mode.
-// EAX enables one-shot authenticated encryption in EAX mode.
+/* Status codes used by every fallible API in this library. */
+#define AES_OK   0
+#define AES_ERR  (-1)
 
-// The #ifndef-guard allows it to be configured before #include'ing or at compile time.
+/*
+ * Mode selection (define to 1/0 before including this header, or via -D).
+ *
+ * Default build enables CTR only. CBC, ECB, OFB, CCM, EAX, EAX_PRIME, and GCM
+ * are opt-in so unused modes do not contribute code or context fields.
+ */
 #ifndef CBC
   #define CBC 0
 #endif
@@ -46,6 +45,19 @@
 
 #ifndef EAX
   #define EAX 0
+#endif
+
+#ifndef EAX_PRIME
+  #define EAX_PRIME 0
+#endif
+
+/* When 1 (default), one-shot paths wipe stack key material on exit. */
+#ifndef AES_ZEROIZE
+  #define AES_ZEROIZE 1
+#endif
+
+#if (AES_ZEROIZE != 0) && (AES_ZEROIZE != 1)
+  #error "AES_ZEROIZE must be 0 or 1"
 #endif
 
 /* GCM GHASH implementation profiles. */
@@ -99,27 +111,27 @@ void AES_GCM_GHASH_HARDWARE_MULTIPLY(uint8_t* result,
   #error "AES_WIDE_OPS must be 0 or 1"
 #endif
 
-/* AES128 is the default when no key size is selected by the build. */
+/* AES128 is the default when no key-size macro is supplied by the build. */
 #if !defined(AES128) && !defined(AES192) && !defined(AES256)
   #define AES128 1
 #endif
 
-#define AES_BLOCKLEN 16 // Block length in bytes - AES is 128b block only
+#define AES_BLOCKLEN 16 /* AES block length in bytes (128-bit block only). */
 
 #if defined(AES256) && (AES256 == 1)
     #define AES_KEYLEN 32
-    #define AES_keyExpSize 240
+    #define AES_KEY_EXP_SIZE 240
 #elif defined(AES192) && (AES192 == 1)
     #define AES_KEYLEN 24
-    #define AES_keyExpSize 208
+    #define AES_KEY_EXP_SIZE 208
 #else
-    #define AES_KEYLEN 16   // Key length in bytes
-    #define AES_keyExpSize 176
+    #define AES_KEYLEN 16
+    #define AES_KEY_EXP_SIZE 176
 #endif
 
 struct AES_ctx
 {
-  uint8_t RoundKey[AES_keyExpSize];
+  uint8_t RoundKey[AES_KEY_EXP_SIZE];
 #if (defined(CBC) && (CBC == 1)) || (defined(CTR) && (CTR == 1)) || \
     (defined(OFB) && (OFB == 1))
   uint8_t Iv[AES_BLOCKLEN];
@@ -129,6 +141,12 @@ struct AES_ctx
 #endif
 };
 
+/* Best-effort wipe of sensitive bytes (volatile stores; not a formal barrier). */
+void AES_secure_zero(void* memory, size_t length);
+
+/* Wipe an AES context (round keys, IV, and OFB position when present). */
+void AES_ctx_clear(struct AES_ctx* ctx);
+
 void AES_init_ctx(struct AES_ctx* ctx, const uint8_t* key);
 #if defined(AES_CAVP) && (AES_CAVP == 1)
 /* Test-only forward-cipher hook used by the AESAVS Monte Carlo harness. */
@@ -136,7 +154,7 @@ void AES_CAVP_encrypt_block(const uint8_t* key, uint8_t block[AES_BLOCKLEN]);
 void AES_CAVP_decrypt_block(const uint8_t* key, uint8_t block[AES_BLOCKLEN]);
 #endif
 #if AES_SBOX_MODE == AES_SBOX_MODE_RUNTIME
-/* Must be called before AES_init_ctx(), AES_init_ctx_iv(), or encryption. */
+/* Must be called once before AES_init_ctx(), AES_init_ctx_iv(), or encryption. */
 void AES_init_sbox(void);
 #endif
 #if (defined(CBC) && (CBC == 1)) || (defined(CTR) && (CTR == 1)) || \
@@ -146,52 +164,38 @@ void AES_ctx_set_iv(struct AES_ctx* ctx, const uint8_t* iv);
 #endif
 
 #if defined(ECB) && (ECB == 1)
-// buffer size is exactly AES_BLOCKLEN bytes; 
-// you need only AES_init_ctx as IV is not used in ECB 
-// NB: ECB is considered insecure for most uses
+/* Buffer must be exactly AES_BLOCKLEN bytes. ECB is insecure for most uses. */
 void AES_ECB_encrypt(const struct AES_ctx* ctx, uint8_t* buf);
 void AES_ECB_decrypt(const struct AES_ctx* ctx, uint8_t* buf);
-
-#endif // #if defined(ECB) && (ECB == !)
-
+#endif
 
 #if defined(CBC) && (CBC == 1)
-// buffer size MUST be mutile of AES_BLOCKLEN;
-// Suggest https://en.wikipedia.org/wiki/Padding_(cryptography)#PKCS7 for padding scheme
-// NOTES: you need to set IV in ctx via AES_init_ctx_iv() or AES_ctx_set_iv()
-//        no IV should ever be reused with the same key 
+/*
+ * Buffer length must be a multiple of AES_BLOCKLEN (no padding is applied).
+ * Set IV via AES_init_ctx_iv() or AES_ctx_set_iv(). Never reuse an IV with
+ * the same key.
+ */
 void AES_CBC_encrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length);
 void AES_CBC_decrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length);
-
-#endif // #if defined(CBC) && (CBC == 1)
-
+#endif
 
 #if defined(CTR) && (CTR == 1)
-
-// Same function for encrypting as for decrypting. 
-// IV is incremented for every block, and used after encryption as XOR-compliment for output
-// Suggesting https://en.wikipedia.org/wiki/Padding_(cryptography)#PKCS7 for padding scheme
-// NOTES: you need to set IV in ctx with AES_init_ctx_iv() or AES_ctx_set_iv()
-//        no IV should ever be reused with the same key 
+/*
+ * Encrypt and decrypt are the same operation. The IV is incremented for every
+ * block. Never reuse an IV with the same key.
+ */
 void AES_CTR_xcrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length);
-
-#endif // #if defined(CTR) && (CTR == 1)
-
+#endif
 
 #if defined(OFB) && (OFB == 1)
-
-// Same function for encrypting as for decrypting.
-// NOTES: you need to set IV in ctx with AES_init_ctx_iv() or AES_ctx_set_iv()
-//        no IV should ever be reused with the same key
+/*
+ * Encrypt and decrypt are the same operation. Never reuse an IV with the same
+ * key. OFB provides confidentiality only.
+ */
 void AES_OFB_xcrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length);
-
-#endif // #if defined(OFB) && (OFB == 1)
-
+#endif
 
 #if defined(GCM) && (GCM == 1)
-
-#define AES_GCM_SUCCESS 0
-#define AES_GCM_ERROR   (-1)
 
 struct AES_GCM_ctx
 {
@@ -204,7 +208,7 @@ struct AES_GCM_ctx
   uint8_t ghash[AES_BLOCKLEN];
 #if (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_TABLE4) || \
     (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_FAST_TABLE)
-      uint8_t ghash_table[32][16][AES_BLOCKLEN];
+  uint8_t ghash_table[32][16][AES_BLOCKLEN];
 #endif
 
   uint64_t aad_len;
@@ -216,15 +220,15 @@ struct AES_GCM_ctx
 };
 
 /*
- * Initialize GCM with a key and nonce. The nonce may have any non-zero
- * length; the 96-bit form is the fast path recommended by NIST SP 800-38D.
+ * Initialize GCM with a key and nonce. The nonce may have any non-zero length;
+ * the 96-bit form is the fast path recommended by NIST SP 800-38D.
  */
 int AES_GCM_init(struct AES_GCM_ctx* ctx, const uint8_t* key,
                  const uint8_t* iv, size_t iv_len);
 
 /* AAD must be supplied before the first encrypt/decrypt update. A context is
- * single-direction; reinitialize it before switching between encryption and
- * decryption. Every update return value must be checked. */
+ * single-direction; reinitialize before switching direction. Check every
+ * return value. */
 int AES_GCM_aad_update(struct AES_GCM_ctx* ctx, const uint8_t* aad,
                        size_t length);
 int AES_GCM_encrypt_update(struct AES_GCM_ctx* ctx, uint8_t* buf,
@@ -241,14 +245,11 @@ int AES_GCM_decrypt_finish(struct AES_GCM_ctx* ctx, const uint8_t* tag,
 /* Clear expanded key material and intermediate authentication state. */
 void AES_GCM_clear(struct AES_GCM_ctx* ctx);
 
-#endif // #if defined(GCM) && (GCM == 1)
+#endif /* GCM */
 
 #if defined(CCM) && (CCM == 1)
 
-#define AES_CCM_SUCCESS 0
-#define AES_CCM_ERROR   (-1)
-
-/* CCM is a packet mode: the payload and AAD lengths are known at entry. */
+/* CCM is a packet mode: payload and AAD lengths are known at entry. */
 int AES_CCM_encrypt(const uint8_t* key, const uint8_t* nonce,
                     size_t nonce_len, const uint8_t* aad, size_t aad_len,
                     const uint8_t* plaintext, size_t plaintext_len,
@@ -263,11 +264,7 @@ int AES_CCM_decrypt(const uint8_t* key, const uint8_t* nonce,
 
 #if defined(EAX) && (EAX == 1)
 
-#define AES_EAX_SUCCESS 0
-#define AES_EAX_ERROR   (-1)
-
-/* EAX supports arbitrary nonce, AAD, message, and tag lengths up to one
- * AES block. Authentication failure leaves plaintext output untouched. */
+/* EAX one-shot AEAD. Authentication failure leaves plaintext untouched. */
 int AES_EAX_encrypt(const uint8_t* key, const uint8_t* nonce,
                     size_t nonce_len, const uint8_t* aad, size_t aad_len,
                     const uint8_t* plaintext, size_t plaintext_len,
@@ -281,13 +278,9 @@ int AES_EAX_decrypt(const uint8_t* key, const uint8_t* nonce,
 
 #if defined(EAX_PRIME) && (EAX_PRIME == 1)
 
-#define AES_EAX_PRIME_SUCCESS 0
-#define AES_EAX_PRIME_ERROR   (-1)
 #define AES_EAX_PRIME_TAG_LEN 4
 
-/* ANSI C12.22 EAX' authenticates cleartext and optionally encrypts a
- * plaintext. The four-byte tag is fixed by C12.22. Authentication failure
- * leaves plaintext output untouched. */
+/* ANSI C12.22 EAX'. Fixed four-byte tag. Auth failure leaves output untouched. */
 int AES_EAX_PRIME_encrypt(const uint8_t* key, const uint8_t* cleartext,
                           size_t cleartext_len, const uint8_t* plaintext,
                           size_t plaintext_len, uint8_t* ciphertext,
@@ -300,4 +293,4 @@ int AES_EAX_PRIME_decrypt(const uint8_t* key, const uint8_t* cleartext,
 
 #endif
 
-#endif // _AES_H_
+#endif /* _AES_H_ */

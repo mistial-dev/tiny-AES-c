@@ -40,10 +40,10 @@ int main(void)
   for (iteration = 0; iteration < BENCHMARK_ITERATIONS; ++iteration)
   {
     struct AES_GCM_ctx ctx;
-    if (AES_GCM_init(&ctx, key, iv, sizeof(iv)) != AES_GCM_SUCCESS ||
-        AES_GCM_aad_update(&ctx, aad, sizeof(aad)) != AES_GCM_SUCCESS ||
-        AES_GCM_encrypt_update(&ctx, buffer, sizeof(buffer)) != AES_GCM_SUCCESS ||
-        AES_GCM_encrypt_finish(&ctx, tag, sizeof(tag)) != AES_GCM_SUCCESS)
+    if (AES_GCM_init(&ctx, key, iv, sizeof(iv)) != AES_OK ||
+        AES_GCM_aad_update(&ctx, aad, sizeof(aad)) != AES_OK ||
+        AES_GCM_encrypt_update(&ctx, buffer, sizeof(buffer)) != AES_OK ||
+        AES_GCM_encrypt_finish(&ctx, tag, sizeof(tag)) != AES_OK)
       return 1;
     AES_GCM_clear(&ctx);
   }
