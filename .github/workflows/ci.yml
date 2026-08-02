@@ -57,6 +57,9 @@ jobs:
     - name: Test
       run: ctest --test-dir build -C Release --output-on-failure --parallel 4
 
+    - name: Test C++ RAII Wrapper
+      run: make test-cpp
+
     - name: Sparse Make configuration coverage
       if: runner.os == 'Linux' && matrix.compiler == 'gcc'
       run: |

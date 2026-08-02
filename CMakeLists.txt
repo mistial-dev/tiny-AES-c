@@ -4,10 +4,12 @@
 
 cmake_minimum_required(VERSION 3.12)
 
-project(tiny-aes C)
+project(tiny-aes C CXX)
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(TINY_AES_BUILD_TESTS "Build unit tests" ON)
 option(TINY_AES_ENABLE_CBC "Enable CBC mode in the main library" OFF)
@@ -162,6 +164,11 @@ endif()
 
 if(TINY_AES_BUILD_TESTS)
     enable_testing()
+
+    add_executable(test_aes_cpp test_cpp.cpp aes.c)
+    target_include_directories(test_aes_cpp PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+    target_compile_definitions(test_aes_cpp PRIVATE AES_ENABLE_CBC=1 AES_ENABLE_ECB=1 AES_ENABLE_CTR=1 AES_ENABLE_OFB=1 AES_ENABLE_GCM=1 AES_ENABLE_CMAC=1 AES128=1)
+    add_test(NAME test_aes_cpp COMMAND test_aes_cpp)
 
     add_library(tiny-aes-munit OBJECT munit.c)
 

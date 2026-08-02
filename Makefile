@@ -73,7 +73,10 @@ CONFIG_DEFINITIONS = $(MODE_DEFINITIONS) $(SBOX_DEFINITION) $(WIDE_DEFINITION) \
   $(GHASH_DEFINITION) -DAES_ZEROIZE=$(AES_ZEROIZE) -DAES_STRICT=$(AES_STRICT) \
   -DAES_TINY=$(AES_TINY)
 
-.PHONY: all clean size test benchmark
+CXX ?= c++
+CXXFLAGS ?= -Wall -Wextra -O2 -std=c++11 -I.
+
+.PHONY: all clean size test benchmark test-cpp
 
 all: aes.o
 
@@ -92,7 +95,13 @@ benchmark: benchmark.c aes.c aes.h
 		benchmark.c $(TEST_BUILD_DIR)/benchmark-aes.o -o $(TEST_BUILD_DIR)/benchmark
 	$(TEST_BUILD_DIR)/benchmark
 
-test:
+test-cpp: test_cpp.cpp aes.c aes.h aes.hpp
+	mkdir -p $(TEST_BUILD_DIR)
+	$(CC) $(CFLAGS) -DAES_ENABLE_CBC=1 -DAES_ENABLE_ECB=1 -DAES_ENABLE_CTR=1 -DAES_ENABLE_OFB=1 -DAES_ENABLE_GCM=1 -DAES_ENABLE_CMAC=1 -DAES128=1 -c aes.c -o $(TEST_BUILD_DIR)/aes-cpp-core.o
+	$(CXX) $(CXXFLAGS) -DAES_ENABLE_CBC=1 -DAES_ENABLE_ECB=1 -DAES_ENABLE_CTR=1 -DAES_ENABLE_OFB=1 -DAES_ENABLE_GCM=1 -DAES_ENABLE_CMAC=1 -DAES128=1 test_cpp.cpp $(TEST_BUILD_DIR)/aes-cpp-core.o -o $(TEST_BUILD_DIR)/test_cpp
+	$(TEST_BUILD_DIR)/test_cpp
+
+test: test-cpp
 	@set -e; \
 	mkdir -p $(TEST_BUILD_DIR); \
 	$(CC) $(CFLAGS) -UAES_ENABLE_CBC -UAES_ENABLE_ECB -UAES_ENABLE_CTR -UAES_ENABLE_OFB -UAES_ENABLE_GCM -UAES_ENABLE_CCM -UAES_ENABLE_EAX -UAES_ENABLE_EAX_PRIME -UAES_ENABLE_SIV -UAES_ENABLE_CMAC -UAES_CAVP -UAES_GCM_GHASH_MODE -c munit.c -o $(TEST_BUILD_DIR)/munit.o; \
