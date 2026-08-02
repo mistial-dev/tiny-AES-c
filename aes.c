@@ -1192,17 +1192,18 @@ static void gcm_finish_ghash(struct AES_GCM_ctx* ctx)
   gcm_ghash_block(ctx, length_block);
 }
 
+/*
+ * NIST SP 800-38D §5.2.1.2: the tag bit length t shall be one of
+ *   128, 120, 112, 104, 96, 64, or 32
+ * (bytes: 16, 15, 14, 13, 12, 8, or 4). No other lengths are permitted.
+ * An implementation may support a subset; this library accepts the full set.
+ * Tags of 32 and 64 bits have additional usage limits in Appendix C.
+ */
 static int gcm_tag_length_is_valid(size_t tag_len)
 {
-  if (tag_len > 16)
-    return 0;
-#if AES_GCM_ALLOW_TAG4
-  if (tag_len == 4)
-    return 1;
-#endif
-  if (tag_len < AES_GCM_MIN_TAG_LEN)
-    return 0;
-  return tag_len == 8 || tag_len >= 12;
+  return tag_len == 16 || tag_len == 15 || tag_len == 14 ||
+         tag_len == 13 || tag_len == 12 || tag_len == 8 ||
+         tag_len == 4;
 }
 
 static void gcm_make_tag(const struct AES_GCM_ctx* ctx, uint8_t* tag)

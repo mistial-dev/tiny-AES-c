@@ -596,7 +596,7 @@ static MunitResult test_gcm(const MunitParameter params[], void* data)
   struct AES_GCM_ctx ctx;
   uint8_t buffer[16];
   uint8_t tag[16];
-  uint8_t short_tag[8];
+  uint8_t short_tag[4];
   uint8_t bad_tag[16];
 
   (void) params;

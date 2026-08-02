@@ -23,8 +23,7 @@ SPDX-License-Identifier: Unlicense
   IV left unchanged).
 - EAX rejects tags shorter than `AES_EAX_MIN_TAG_LEN` (default 8) and zero-length
   tags.
-- GCM rejects tags shorter than `AES_GCM_MIN_TAG_LEN` (default 8). Four-byte tags
-  require `AES_GCM_ALLOW_TAG4=1` (set automatically for CAVP builds).
+- GCM tag lengths follow NIST SP 800-38D only: 4, 8, or 12–16 bytes.
 - No compatibility aliases are provided; update call sites.
 
 ### Added

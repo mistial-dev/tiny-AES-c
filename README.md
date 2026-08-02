@@ -63,8 +63,6 @@ and/or `EAX_PRIME` to `1` before including `aes.h`.
 | `AES_STRICT` | 0 | NULL checks on classical buffer APIs |
 | `AES_TINY` | 0 | `#error` if GHASH is table4/fast-table |
 | `AES_EAX_MIN_TAG_LEN` | 8 | Minimum EAX tag length |
-| `AES_GCM_MIN_TAG_LEN` | 8 | Minimum GCM tag length |
-| `AES_GCM_ALLOW_TAG4` | 0 | Allow 4-byte GCM tags (CAVP) |
 | `AES_GCM_SHARED_TABLE` | 0 | One shared 8 KiB GHASH table (BSS) |
 | `AES_GCM_GHASH_MODE` | auto | bitwise / wide / table4 / fast-table / hardware |
 
@@ -248,8 +246,10 @@ Prefer one-shot decrypt when the full ciphertext is available.
 - **No padding** is provided. CBC/ECB lengths must be multiples of 16 bytes.
 - CBC rejects non-aligned lengths with `AES_ERR`. CTR rejects requests that
   would wrap the 128-bit counter (buffer and IV left unchanged).
-- EAX tags must be at least 8 bytes by default. GCM tags default to at least 8
-  bytes; 16 is recommended. Four-byte GCM tags require `AES_GCM_ALLOW_TAG4`.
+- EAX tags must be at least 8 bytes by default (library policy, not NIST GCM).
+- GCM tags must be one of **4, 8, or 12–16** bytes (NIST SP 800-38D §5.2.1.2).
+  Sixteen is the usual choice; 4- and 8-byte tags have extra limits in
+  Appendix C and are weak for general use.
 - EAX′ uses the fixed four-byte C12.22 tag by specification.
 - Default S-box access uses fixed-size masked scans to reduce cache-timing
   leakage. Constant-time behaviour still depends on the compiler and CPU.

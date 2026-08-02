@@ -74,19 +74,6 @@
   #define AES_EAX_MIN_TAG_LEN 8
 #endif
 
-/* Minimum GCM tag length. Length 4 requires AES_GCM_ALLOW_TAG4=1 (CAVP). */
-#ifndef AES_GCM_MIN_TAG_LEN
-  #define AES_GCM_MIN_TAG_LEN 8
-#endif
-
-#ifndef AES_GCM_ALLOW_TAG4
-  #define AES_GCM_ALLOW_TAG4 0
-#endif
-
-#if (AES_GCM_ALLOW_TAG4 != 0) && (AES_GCM_ALLOW_TAG4 != 1)
-  #error "AES_GCM_ALLOW_TAG4 must be 0 or 1"
-#endif
-
 /*
  * AES_TINY=1 rejects GHASH table profiles (~8.5 KiB per context by default).
  * AES_GCM_SHARED_TABLE=1 stores one file-scope 8 KiB table for all contexts
@@ -293,7 +280,7 @@ int AES_GCM_encrypt_update(struct AES_GCM_ctx* ctx, uint8_t* buf,
 int AES_GCM_decrypt_update(struct AES_GCM_ctx* ctx, uint8_t* buf,
                            size_t length);
 
-/* Default tags are 8 or 12–16 bytes. Tag length 4 needs AES_GCM_ALLOW_TAG4. */
+/* Tag length must be one of 4, 8, or 12–16 bytes (NIST SP 800-38D). */
 int AES_GCM_encrypt_finish(struct AES_GCM_ctx* ctx, uint8_t* tag,
                            size_t tag_len);
 int AES_GCM_decrypt_finish(struct AES_GCM_ctx* ctx, const uint8_t* tag,
