@@ -317,9 +317,9 @@ static MunitResult test_eax_api(const MunitParameter params[], void* data)
                                    sizeof(tag), bad), ==, AES_ERR);
 
   munit_assert_int(AES_EAX_encrypt(key, NULL, 0, NULL, 0, NULL, 0, NULL,
-                                   NULL, 0), ==, AES_OK);
-  munit_assert_int(AES_EAX_decrypt(key, NULL, 0, NULL, 0, NULL, 0, NULL, 0,
-                                   NULL), ==, AES_OK);
+                                   tag, sizeof(tag)), ==, AES_OK);
+  munit_assert_int(AES_EAX_decrypt(key, NULL, 0, NULL, 0, NULL, 0, tag,
+                                   sizeof(tag), NULL), ==, AES_OK);
   munit_assert_int(AES_EAX_encrypt(key, nonce, sizeof(nonce), aad, sizeof(aad),
                                    message, sizeof(message), ciphertext, tag,
                                    sizeof(tag) + 1), ==, AES_ERR);
@@ -337,7 +337,13 @@ static MunitResult test_eax_api(const MunitParameter params[], void* data)
                                    sizeof(tag)), ==, AES_ERR);
   munit_assert_int(AES_EAX_encrypt(key, nonce, sizeof(nonce), aad, sizeof(aad),
                                    message, sizeof(message), ciphertext,
-                                   empty_tag, 0), ==, AES_OK);
+                                   empty_tag, 0), ==, AES_ERR);
+  munit_assert_int(AES_EAX_encrypt(key, nonce, sizeof(nonce), aad, sizeof(aad),
+                                   message, sizeof(message), ciphertext, tag,
+                                   7), ==, AES_ERR);
+  munit_assert_int(AES_EAX_encrypt(key, nonce, sizeof(nonce), aad, sizeof(aad),
+                                   message, sizeof(message), ciphertext, tag,
+                                   8), ==, AES_OK);
   return MUNIT_OK;
 }
 

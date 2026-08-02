@@ -69,6 +69,24 @@
   #error "AES_STRICT must be 0 or 1"
 #endif
 
+/* Minimum EAX tag length (not used by EAX'). Override only for exotic vectors. */
+#ifndef AES_EAX_MIN_TAG_LEN
+  #define AES_EAX_MIN_TAG_LEN 8
+#endif
+
+/* Minimum GCM tag length. Length 4 requires AES_GCM_ALLOW_TAG4=1 (CAVP). */
+#ifndef AES_GCM_MIN_TAG_LEN
+  #define AES_GCM_MIN_TAG_LEN 8
+#endif
+
+#ifndef AES_GCM_ALLOW_TAG4
+  #define AES_GCM_ALLOW_TAG4 0
+#endif
+
+#if (AES_GCM_ALLOW_TAG4 != 0) && (AES_GCM_ALLOW_TAG4 != 1)
+  #error "AES_GCM_ALLOW_TAG4 must be 0 or 1"
+#endif
+
 /* GCM GHASH implementation profiles. */
 #define AES_GCM_GHASH_MODE_AUTO       0
 #define AES_GCM_GHASH_MODE_BITWISE    1
@@ -246,7 +264,7 @@ int AES_GCM_encrypt_update(struct AES_GCM_ctx* ctx, uint8_t* buf,
 int AES_GCM_decrypt_update(struct AES_GCM_ctx* ctx, uint8_t* buf,
                            size_t length);
 
-/* Tag lengths permitted by SP 800-38D are 4, 8, and 12 through 16 bytes. */
+/* Default tags are 8 or 12–16 bytes. Tag length 4 needs AES_GCM_ALLOW_TAG4. */
 int AES_GCM_encrypt_finish(struct AES_GCM_ctx* ctx, uint8_t* tag,
                            size_t tag_len);
 int AES_GCM_decrypt_finish(struct AES_GCM_ctx* ctx, const uint8_t* tag,
@@ -274,7 +292,8 @@ int AES_CCM_decrypt(const uint8_t* key, const uint8_t* nonce,
 
 #if defined(EAX) && (EAX == 1)
 
-/* EAX one-shot AEAD. Authentication failure leaves plaintext untouched. */
+/* EAX one-shot AEAD. Tags must be AES_EAX_MIN_TAG_LEN..16. Auth failure
+ * leaves plaintext untouched. */
 int AES_EAX_encrypt(const uint8_t* key, const uint8_t* nonce,
                     size_t nonce_len, const uint8_t* aad, size_t aad_len,
                     const uint8_t* plaintext, size_t plaintext_len,

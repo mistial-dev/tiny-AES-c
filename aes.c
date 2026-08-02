@@ -1182,7 +1182,15 @@ static void gcm_finish_ghash(struct AES_GCM_ctx* ctx)
 
 static int gcm_tag_length_is_valid(size_t tag_len)
 {
-  return tag_len == 4 || tag_len == 8 || (tag_len >= 12 && tag_len <= 16);
+  if (tag_len > 16)
+    return 0;
+#if AES_GCM_ALLOW_TAG4
+  if (tag_len == 4)
+    return 1;
+#endif
+  if (tag_len < AES_GCM_MIN_TAG_LEN)
+    return 0;
+  return tag_len == 8 || tag_len >= 12;
 }
 
 static void gcm_make_tag(const struct AES_GCM_ctx* ctx, uint8_t* tag)
@@ -1840,7 +1848,7 @@ static int eax_crypt(const uint8_t* key, const uint8_t* nonce,
   if (key == NULL || (nonce_len != 0 && nonce == NULL) ||
       (aad_len != 0 && aad == NULL) ||
       (input_len != 0 && (input == NULL || output == NULL)) ||
-      (tag_len != 0 && tag == NULL) || tag_len > AES_BLOCKLEN)
+      tag == NULL || tag_len < AES_EAX_MIN_TAG_LEN || tag_len > AES_BLOCKLEN)
     return AES_ERR;
 
   AES_init_ctx(&aes, key);

@@ -92,7 +92,7 @@ test:
 	  key=$$1; mode=$$2; cbc=$$3; ecb=$$4; ctr=$$5; ofb=$$6; gcm=$$7; ccm=$$8; eax=$$9; ghash=$${10}; sbox=$${11}; wide=$${12}; \
 	  prime=0; if [ "$${mode}" = eax-prime ]; then prime=1; fi; \
 	  name=$${key}-$${mode}-gcm$${gcm}-ccm$${ccm}-eax$${eax}-eaxprime$${prime}-ghash$${ghash}-sbox$${sbox}-wide$${wide}-cavp$(AES_CAVP); \
-	  common="$(CFLAGS) -DCBC=$${cbc} -DECB=$${ecb} -DCTR=$${ctr} -DOFB=$${ofb} -DGCM=$${gcm} -DCCM=$${ccm} -DEAX=$${eax} -DEAX_PRIME=$${prime} -DAES_CAVP=$(AES_CAVP) -DAES$${key}=1 -DAES_SBOX_MODE=$${sbox} -DAES_WIDE_OPS=$${wide} -DAES_GCM_GHASH_MODE=$${ghash} -DCAVP_VECTOR_DIR=\"test_vectors/cavp\" -DEAX_VECTOR_FILE=\"test_vectors/eax/aes_eax_test.json\""; \
+	  common="$(CFLAGS) -DCBC=$${cbc} -DECB=$${ecb} -DCTR=$${ctr} -DOFB=$${ofb} -DGCM=$${gcm} -DCCM=$${ccm} -DEAX=$${eax} -DEAX_PRIME=$${prime} -DAES_CAVP=$(AES_CAVP) -DAES_GCM_ALLOW_TAG4=$(AES_CAVP) -DAES$${key}=1 -DAES_SBOX_MODE=$${sbox} -DAES_WIDE_OPS=$${wide} -DAES_GCM_GHASH_MODE=$${ghash} -DCAVP_VECTOR_DIR=\"test_vectors/cavp\" -DEAX_VECTOR_FILE=\"test_vectors/eax/aes_eax_test.json\""; \
 	  if [ "$${ghash}" = 5 ]; then common="$${common} -DAES_GCM_GHASH_HARDWARE_MULTIPLY=AES_CAVP_GHASH_HARDWARE_MULTIPLY"; fi; \
 	  $(CC) $${common} -c aes.c -o $(TEST_BUILD_DIR)/aes-$${name}.o; \
 	  $(CC) $${common} -c test.c -o $(TEST_BUILD_DIR)/test-$${name}.o; \

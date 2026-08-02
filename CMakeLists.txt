@@ -186,6 +186,7 @@ if(TINY_AES_BUILD_TESTS)
         target_compile_definitions(test_core_${test_name} PRIVATE
             CBC=${cbc} ECB=${ecb} CTR=${ctr} OFB=${ofb} GCM=${gcm} CCM=${ccm} EAX=${eax_mode} EAX_PRIME=${eax_prime_mode}
             AES_CAVP=${cavp}
+            AES_GCM_ALLOW_TAG4=${cavp}
             AES_GCM_GHASH_MODE=${ghash_index}
             ${key_definition} ${sbox_definition} AES_WIDE_OPS=${wide}
             ${hardware_definition}
