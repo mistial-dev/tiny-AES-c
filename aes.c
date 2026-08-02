@@ -709,3 +709,498 @@ void AES_CTR_xcrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length)
 }
 
 #endif // #if defined(CTR) && (CTR == 1)
+
+
+#if defined(GCM) && (GCM == 1)
+
+#define AES_GCM_PHASE_AAD   0u
+#define AES_GCM_PHASE_TEXT  1u
+#define AES_GCM_PHASE_FINAL 2u
+#define AES_GCM_DIRECTION_NONE    0u
+#define AES_GCM_DIRECTION_ENCRYPT 1u
+#define AES_GCM_DIRECTION_DECRYPT 2u
+#define AES_GCM_MAX_TEXT_BYTES ((((uint64_t)1) << 36) - 32u)
+
+static void gcm_store_be64(uint8_t* dst, uint64_t value)
+{
+  unsigned i;
+  for (i = 0; i < 8; ++i)
+    dst[7u - i] = (uint8_t)(value >> (i * 8u));
+}
+
+#if defined(UINT64_MAX) && \
+    ((AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_WIDE) || \
+     ((AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_AUTO) && AES_WIDE_OPS))
+static uint64_t gcm_load_be64(const uint8_t* src)
+{
+  uint64_t value = 0;
+  unsigned i;
+  for (i = 0; i < 8; ++i)
+    value = (value << 8) | src[i];
+  return value;
+}
+#endif
+
+/* Constant-time bytewise multiplication in GF(2^128). */
+#if (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_BITWISE) || \
+    (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_AUTO && \
+     (!AES_WIDE_OPS || !defined(UINT64_MAX))) || \
+    (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_TABLE4) || \
+    (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_FAST_TABLE) || \
+    (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_WIDE && !defined(UINT64_MAX))
+static void gcm_multiply_bitwise(uint8_t* result, const uint8_t* left,
+                                 const uint8_t* right)
+{
+  uint8_t z[AES_BLOCKLEN] = { 0 };
+  uint8_t v[AES_BLOCKLEN];
+  unsigned bit;
+
+  aes_copy_bytes(v, right, AES_BLOCKLEN);
+  for (bit = 0; bit < 128; ++bit)
+  {
+    const uint8_t bit_mask = (uint8_t)(0u -
+      (uint8_t)((left[bit / 8u] >> (7u - (bit % 8u))) & 1u));
+    uint8_t carry = 0;
+    unsigned i;
+
+    for (i = 0; i < AES_BLOCKLEN; ++i)
+      z[i] ^= (uint8_t)(v[i] & bit_mask);
+
+    for (i = 0; i < AES_BLOCKLEN; ++i)
+    {
+      const uint8_t next_carry = (uint8_t)(v[i] & 1u);
+      v[i] = (uint8_t)((v[i] >> 1) | (carry << 7));
+      carry = next_carry;
+    }
+    v[0] ^= (uint8_t)(0xe1u & (uint8_t)(0u - carry));
+  }
+  aes_copy_bytes(result, z, AES_BLOCKLEN);
+}
+#endif
+
+#if AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_WIDE || \
+    ((AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_AUTO) && AES_WIDE_OPS)
+#if defined(UINT64_MAX)
+static void gcm_multiply_wide(uint8_t* result, const uint8_t* left,
+                              const uint8_t* right)
+{
+  uint64_t xh = gcm_load_be64(left);
+  uint64_t xl = gcm_load_be64(left + 8);
+  uint64_t zh = 0;
+  uint64_t zl = 0;
+  uint64_t vh = gcm_load_be64(right);
+  uint64_t vl = gcm_load_be64(right + 8);
+  unsigned bit;
+
+  for (bit = 0; bit < 128; ++bit)
+  {
+    const uint64_t bit_mask = 0u - (xh >> 63);
+    const uint64_t reduction = 0xe100000000000000ULL & (0u - (vl & 1u));
+    zh ^= vh & bit_mask;
+    zl ^= vl & bit_mask;
+    vl = (vl >> 1) | (vh << 63);
+    vh = (vh >> 1) ^ reduction;
+    xh = (xh << 1) | (xl >> 63);
+    xl <<= 1;
+  }
+  gcm_store_be64(result, zh);
+  gcm_store_be64(result + 8, zl);
+}
+#endif
+#endif
+
+#if (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_TABLE4) || \
+    (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_FAST_TABLE)
+static void gcm_init_table(struct AES_GCM_ctx* ctx)
+{
+  uint8_t input[AES_BLOCKLEN];
+  unsigned position;
+  unsigned entry;
+
+  for (position = 0; position < 32; ++position)
+  {
+    for (entry = 0; entry < 16; ++entry)
+    {
+      memset(input, 0, AES_BLOCKLEN);
+      input[position / 2u] = (uint8_t)((position % 2u) == 0u ?
+        entry << 4 : entry);
+      gcm_multiply_bitwise(ctx->ghash_table[position][entry], input,
+                           ctx->H);
+    }
+  }
+}
+
+#if AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_TABLE4
+static void gcm_select_table4(uint8_t* selected,
+                              const uint8_t table[16][AES_BLOCKLEN],
+                              uint8_t nibble)
+{
+  unsigned entry;
+  unsigned i;
+  memset(selected, 0, AES_BLOCKLEN);
+  for (entry = 0; entry < 16; ++entry)
+  {
+    const uint8_t mask = (uint8_t)(0u - (uint8_t)(entry == nibble));
+    for (i = 0; i < AES_BLOCKLEN; ++i)
+      selected[i] |= (uint8_t)(table[entry][i] & mask);
+  }
+}
+#endif
+
+static void gcm_multiply_table4(uint8_t* result, const uint8_t* left,
+                                const struct AES_GCM_ctx* ctx)
+{
+  uint8_t value[AES_BLOCKLEN] = { 0 };
+  uint8_t selected[AES_BLOCKLEN];
+  unsigned position;
+
+  for (position = 0; position < 32; ++position)
+  {
+    const uint8_t nibble = (uint8_t)((position % 2u) == 0u ?
+      left[position / 2u] >> 4 : left[position / 2u] & 0x0fu);
+#if AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_FAST_TABLE
+    aes_copy_bytes(selected, ctx->ghash_table[position][nibble], AES_BLOCKLEN);
+#else
+    gcm_select_table4(selected, ctx->ghash_table[position], nibble);
+#endif
+    for (unsigned i = 0; i < AES_BLOCKLEN; ++i)
+      value[i] ^= selected[i];
+  }
+  aes_copy_bytes(result, value, AES_BLOCKLEN);
+}
+#endif
+
+#if AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_HARDWARE
+#ifndef AES_GCM_GHASH_HARDWARE_MULTIPLY
+#error "AES_GCM_GHASH_HARDWARE_MULTIPLY must be defined for hardware GHASH mode"
+#endif
+#endif
+
+static void gcm_multiply(uint8_t* result, const uint8_t* left,
+                         const struct AES_GCM_ctx* ctx)
+{
+#if AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_HARDWARE
+  AES_GCM_GHASH_HARDWARE_MULTIPLY(result, left, ctx->H);
+#elif (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_TABLE4) || \
+      (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_FAST_TABLE)
+  gcm_multiply_table4(result, left, ctx);
+#elif AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_WIDE || \
+      ((AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_AUTO) && AES_WIDE_OPS)
+#if defined(UINT64_MAX)
+  gcm_multiply_wide(result, left, ctx->H);
+#else
+  gcm_multiply_bitwise(result, left, ctx->H);
+#endif
+#else
+  gcm_multiply_bitwise(result, left, ctx->H);
+#endif
+}
+
+static void gcm_ghash_block(struct AES_GCM_ctx* ctx, const uint8_t* block)
+{
+  uint8_t value[AES_BLOCKLEN];
+  unsigned i;
+
+  for (i = 0; i < AES_BLOCKLEN; ++i)
+    value[i] = (uint8_t)(ctx->S[i] ^ block[i]);
+  gcm_multiply(ctx->S, value, ctx);
+}
+
+static void gcm_hash_bytes(struct AES_GCM_ctx* ctx, const uint8_t* data,
+                           size_t length)
+{
+  uint8_t block[AES_BLOCKLEN] = { 0 };
+
+  while (length >= AES_BLOCKLEN)
+  {
+    gcm_ghash_block(ctx, data);
+    data += AES_BLOCKLEN;
+    length -= AES_BLOCKLEN;
+  }
+  if (length != 0)
+  {
+    aes_copy_bytes(block, data, length);
+    gcm_ghash_block(ctx, block);
+  }
+}
+
+static void gcm_make_j0(struct AES_GCM_ctx* ctx, const uint8_t* iv,
+                        size_t iv_len)
+{
+  uint8_t length_block[AES_BLOCKLEN] = { 0 };
+
+  memset(ctx->S, 0, AES_BLOCKLEN);
+  memset(ctx->ghash, 0, AES_BLOCKLEN);
+  if (iv_len == 12)
+  {
+    memset(ctx->J0, 0, AES_BLOCKLEN);
+    aes_copy_bytes(ctx->J0, iv, iv_len);
+    ctx->J0[15] = 1;
+  }
+  else
+  {
+    gcm_hash_bytes(ctx, iv, iv_len);
+    gcm_store_be64(length_block + 8, (uint64_t)iv_len * 8u);
+    gcm_ghash_block(ctx, length_block);
+    aes_copy_bytes(ctx->J0, ctx->S, AES_BLOCKLEN);
+  }
+  memset(ctx->S, 0, AES_BLOCKLEN);
+  memset(ctx->ghash, 0, AES_BLOCKLEN);
+}
+
+static int gcm_length_is_valid(uint64_t current, size_t additional,
+                               uint64_t limit)
+{
+  return (uint64_t)additional <= (limit - current);
+}
+
+static void gcm_pad_ghash(struct AES_GCM_ctx* ctx)
+{
+  if (ctx->ghash_len != 0)
+  {
+    memset(ctx->ghash + ctx->ghash_len, 0,
+           AES_BLOCKLEN - ctx->ghash_len);
+    gcm_ghash_block(ctx, ctx->ghash);
+    ctx->ghash_len = 0;
+    memset(ctx->ghash, 0, AES_BLOCKLEN);
+  }
+}
+
+static void gcm_absorb(struct AES_GCM_ctx* ctx, const uint8_t* data,
+                       size_t length)
+{
+  while (length != 0)
+  {
+    const size_t available = AES_BLOCKLEN - ctx->ghash_len;
+    const size_t count = length < available ? length : available;
+    aes_copy_bytes(ctx->ghash + ctx->ghash_len, data, count);
+    ctx->ghash_len += count;
+    data += count;
+    length -= count;
+    if (ctx->ghash_len == AES_BLOCKLEN)
+    {
+      gcm_ghash_block(ctx, ctx->ghash);
+      ctx->ghash_len = 0;
+      memset(ctx->ghash, 0, AES_BLOCKLEN);
+    }
+  }
+}
+
+static void gcm_increment_counter(uint8_t* counter)
+{
+  unsigned i;
+  for (i = 0; i < 4; ++i)
+  {
+    const unsigned offset = 15u - i;
+    if (counter[offset] != 0xffu)
+    {
+      ++counter[offset];
+      break;
+    }
+    counter[offset] = 0;
+  }
+}
+
+static void gcm_finish_ghash(struct AES_GCM_ctx* ctx)
+{
+  uint8_t length_block[AES_BLOCKLEN] = { 0 };
+
+  gcm_pad_ghash(ctx);
+  gcm_store_be64(length_block, ctx->aad_len * 8u);
+  gcm_store_be64(length_block + 8, ctx->text_len * 8u);
+  gcm_ghash_block(ctx, length_block);
+}
+
+static int gcm_tag_length_is_valid(size_t tag_len)
+{
+  return tag_len == 4 || tag_len == 8 || (tag_len >= 12 && tag_len <= 16);
+}
+
+static void gcm_make_tag(const struct AES_GCM_ctx* ctx, uint8_t* tag)
+{
+  uint8_t mask[AES_BLOCKLEN];
+  uint8_t hash[AES_BLOCKLEN];
+  unsigned i;
+
+  aes_copy_bytes(mask, ctx->J0, AES_BLOCKLEN);
+  Cipher((state_t*)mask, ctx->aes.RoundKey);
+  aes_copy_bytes(hash, ctx->S, AES_BLOCKLEN);
+  for (i = 0; i < AES_BLOCKLEN; ++i)
+    tag[i] = (uint8_t)(mask[i] ^ hash[i]);
+}
+
+int AES_GCM_init(struct AES_GCM_ctx* ctx, const uint8_t* key,
+                 const uint8_t* iv, size_t iv_len)
+{
+  uint8_t zero[AES_BLOCKLEN] = { 0 };
+
+  if (ctx == NULL || key == NULL || iv == NULL || iv_len == 0 ||
+      (uint64_t)iv_len > UINT64_MAX / 8u)
+    return AES_GCM_ERROR;
+
+  AES_init_ctx(&ctx->aes, key);
+  aes_copy_bytes(ctx->H, zero, AES_BLOCKLEN);
+  Cipher((state_t*)ctx->H, ctx->aes.RoundKey);
+#if (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_TABLE4) || \
+    (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_FAST_TABLE)
+  gcm_init_table(ctx);
+#endif
+  gcm_make_j0(ctx, iv, iv_len);
+  aes_copy_bytes(ctx->counter, ctx->J0, AES_BLOCKLEN);
+  aes_copy_bytes(ctx->S, zero, AES_BLOCKLEN);
+  aes_copy_bytes(ctx->ghash, zero, AES_BLOCKLEN);
+  ctx->aad_len = 0;
+  ctx->text_len = 0;
+  ctx->stream_pos = AES_BLOCKLEN;
+  ctx->ghash_len = 0;
+  ctx->phase = AES_GCM_PHASE_AAD;
+  ctx->direction = AES_GCM_DIRECTION_NONE;
+  return AES_GCM_SUCCESS;
+}
+
+int AES_GCM_aad_update(struct AES_GCM_ctx* ctx, const uint8_t* aad,
+                       size_t length)
+{
+  if (ctx == NULL || ctx->phase != AES_GCM_PHASE_AAD ||
+      (length != 0 && aad == NULL) ||
+      !gcm_length_is_valid(ctx->aad_len, length, UINT64_MAX / 8u))
+    return AES_GCM_ERROR;
+
+  gcm_absorb(ctx, aad, length);
+  ctx->aad_len += (uint64_t)length;
+  return AES_GCM_SUCCESS;
+}
+
+static int gcm_update(struct AES_GCM_ctx* ctx, uint8_t* buf, size_t length,
+                      int decrypt)
+{
+  size_t i;
+  const size_t total_length = length;
+  const uint8_t direction = decrypt ? AES_GCM_DIRECTION_DECRYPT :
+                                     AES_GCM_DIRECTION_ENCRYPT;
+
+  if (ctx == NULL || ctx->phase == AES_GCM_PHASE_FINAL ||
+      (length != 0 && buf == NULL) ||
+      !gcm_length_is_valid(ctx->text_len, length, AES_GCM_MAX_TEXT_BYTES))
+    return AES_GCM_ERROR;
+  if (ctx->direction != AES_GCM_DIRECTION_NONE &&
+      ctx->direction != direction)
+    return AES_GCM_ERROR;
+  if (ctx->direction == AES_GCM_DIRECTION_NONE)
+    ctx->direction = direction;
+
+  if (ctx->phase == AES_GCM_PHASE_AAD)
+  {
+    gcm_pad_ghash(ctx);
+    ctx->phase = AES_GCM_PHASE_TEXT;
+  }
+
+  while (length >= AES_BLOCKLEN && ctx->stream_pos == AES_BLOCKLEN &&
+         ctx->ghash_len == 0)
+  {
+    uint8_t ciphertext[AES_BLOCKLEN];
+    unsigned j;
+
+    gcm_increment_counter(ctx->counter);
+    aes_copy_bytes(ctx->stream, ctx->counter, AES_BLOCKLEN);
+    Cipher((state_t*)ctx->stream, ctx->aes.RoundKey);
+    if (decrypt)
+      aes_copy_bytes(ciphertext, buf, AES_BLOCKLEN);
+    for (j = 0; j < AES_BLOCKLEN; ++j)
+      buf[j] ^= ctx->stream[j];
+    gcm_absorb(ctx, decrypt ? ciphertext : buf, AES_BLOCKLEN);
+    buf += AES_BLOCKLEN;
+    length -= AES_BLOCKLEN;
+  }
+
+  for (i = 0; i < length; ++i)
+  {
+    uint8_t ciphertext;
+    if (ctx->stream_pos == AES_BLOCKLEN)
+    {
+      gcm_increment_counter(ctx->counter);
+      aes_copy_bytes(ctx->stream, ctx->counter, AES_BLOCKLEN);
+      Cipher((state_t*)ctx->stream, ctx->aes.RoundKey);
+      ctx->stream_pos = 0;
+    }
+
+    ciphertext = decrypt ? buf[i] : (uint8_t)(buf[i] ^ ctx->stream[ctx->stream_pos]);
+    gcm_absorb(ctx, &ciphertext, 1);
+    if (decrypt)
+      buf[i] ^= ctx->stream[ctx->stream_pos];
+    else
+      buf[i] = ciphertext;
+    ++ctx->stream_pos;
+  }
+  ctx->text_len += (uint64_t)total_length;
+  return AES_GCM_SUCCESS;
+}
+
+int AES_GCM_encrypt_update(struct AES_GCM_ctx* ctx, uint8_t* buf,
+                           size_t length)
+{
+  return gcm_update(ctx, buf, length, 0);
+}
+
+int AES_GCM_decrypt_update(struct AES_GCM_ctx* ctx, uint8_t* buf,
+                           size_t length)
+{
+  return gcm_update(ctx, buf, length, 1);
+}
+
+int AES_GCM_encrypt_finish(struct AES_GCM_ctx* ctx, uint8_t* tag,
+                           size_t tag_len)
+{
+  uint8_t full_tag[AES_BLOCKLEN];
+
+  if (ctx == NULL || tag == NULL || !gcm_tag_length_is_valid(tag_len) ||
+      ctx->phase == AES_GCM_PHASE_FINAL)
+    return AES_GCM_ERROR;
+  if (ctx->phase == AES_GCM_PHASE_AAD)
+  {
+    gcm_pad_ghash(ctx);
+    ctx->phase = AES_GCM_PHASE_TEXT;
+  }
+  gcm_finish_ghash(ctx);
+  gcm_make_tag(ctx, full_tag);
+  aes_copy_bytes(tag, full_tag, tag_len);
+  ctx->phase = AES_GCM_PHASE_FINAL;
+  return AES_GCM_SUCCESS;
+}
+
+int AES_GCM_decrypt_finish(struct AES_GCM_ctx* ctx, const uint8_t* tag,
+                           size_t tag_len)
+{
+  uint8_t expected[AES_BLOCKLEN];
+  uint8_t difference = 0;
+  size_t i;
+
+  if (ctx == NULL || tag == NULL || !gcm_tag_length_is_valid(tag_len) ||
+      ctx->phase == AES_GCM_PHASE_FINAL)
+    return AES_GCM_ERROR;
+  if (ctx->phase == AES_GCM_PHASE_AAD)
+  {
+    gcm_pad_ghash(ctx);
+    ctx->phase = AES_GCM_PHASE_TEXT;
+  }
+  gcm_finish_ghash(ctx);
+  gcm_make_tag(ctx, expected);
+  for (i = 0; i < tag_len; ++i)
+    difference |= (uint8_t)(expected[i] ^ tag[i]);
+  ctx->phase = AES_GCM_PHASE_FINAL;
+  return difference == 0 ? AES_GCM_SUCCESS : AES_GCM_ERROR;
+}
+
+void AES_GCM_clear(struct AES_GCM_ctx* ctx)
+{
+  volatile uint8_t* bytes;
+  size_t i;
+
+  if (ctx == NULL)
+    return;
+  bytes = (volatile uint8_t*)ctx;
+  for (i = 0; i < sizeof(*ctx); ++i)
+    bytes[i] = 0;
+}
+
+#endif // #if defined(GCM) && (GCM == 1)

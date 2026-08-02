@@ -6,6 +6,10 @@ AES_WIDE_OPS ?= off
 AES_ENABLE_CBC ?= 1
 AES_ENABLE_ECB ?= 1
 AES_ENABLE_CTR ?= 1
+AES_ENABLE_GCM ?= 0
+AES_GCM_GHASH_MODE ?= auto
+BENCHMARK_BYTES ?= 16384
+BENCHMARK_ITERATIONS ?= 100
 TEST_BUILD_DIR ?= .tiny-aes-tests
 
 ifeq ($(AES_SBOX_MODE),secure)
@@ -26,10 +30,31 @@ else
 $(error AES_WIDE_OPS must be off or auto)
 endif
 
-MODE_DEFINITIONS = -DCBC=$(AES_ENABLE_CBC) -DECB=$(AES_ENABLE_ECB) -DCTR=$(AES_ENABLE_CTR)
-CONFIG_DEFINITIONS = $(MODE_DEFINITIONS) $(SBOX_DEFINITION) $(WIDE_DEFINITION)
+MODE_DEFINITIONS = -DCBC=$(AES_ENABLE_CBC) -DECB=$(AES_ENABLE_ECB) -DCTR=$(AES_ENABLE_CTR) -DGCM=$(AES_ENABLE_GCM)
+ifeq ($(AES_GCM_GHASH_MODE),auto)
+GHASH_DEFINITION = -DAES_GCM_GHASH_MODE=0
+GHASH_MODE = 0
+else ifeq ($(AES_GCM_GHASH_MODE),bitwise)
+GHASH_DEFINITION = -DAES_GCM_GHASH_MODE=1
+GHASH_MODE = 1
+else ifeq ($(AES_GCM_GHASH_MODE),wide)
+GHASH_DEFINITION = -DAES_GCM_GHASH_MODE=2
+GHASH_MODE = 2
+else ifeq ($(AES_GCM_GHASH_MODE),table4)
+GHASH_DEFINITION = -DAES_GCM_GHASH_MODE=3
+GHASH_MODE = 3
+else ifeq ($(AES_GCM_GHASH_MODE),fast-table)
+GHASH_DEFINITION = -DAES_GCM_GHASH_MODE=4
+GHASH_MODE = 4
+else ifeq ($(AES_GCM_GHASH_MODE),hardware)
+GHASH_DEFINITION = -DAES_GCM_GHASH_MODE=5
+GHASH_MODE = 5
+else
+$(error AES_GCM_GHASH_MODE must be auto, bitwise, wide, table4, fast-table, or hardware)
+endif
+CONFIG_DEFINITIONS = $(MODE_DEFINITIONS) $(SBOX_DEFINITION) $(WIDE_DEFINITION) $(GHASH_DEFINITION)
 
-.PHONY: all clean size test
+.PHONY: all clean size test benchmark
 
 all: aes.o
 
@@ -39,10 +64,19 @@ aes.o: aes.c aes.h
 size: aes.o
 	size aes.o
 
+benchmark: benchmark.c aes.c aes.h
+	mkdir -p $(TEST_BUILD_DIR)
+	$(CC) $(CFLAGS) -DGCM=1 -DAES128=1 -DAES_GCM_GHASH_MODE=$(GHASH_MODE) \
+		-c aes.c -o $(TEST_BUILD_DIR)/benchmark-aes.o
+	$(CC) $(CFLAGS) -DGCM=1 -DAES128=1 -DAES_GCM_GHASH_MODE=$(GHASH_MODE) \
+		-DBENCHMARK_BYTES=$(BENCHMARK_BYTES) -DBENCHMARK_ITERATIONS=$(BENCHMARK_ITERATIONS) \
+		benchmark.c $(TEST_BUILD_DIR)/benchmark-aes.o -o $(TEST_BUILD_DIR)/benchmark
+	$(TEST_BUILD_DIR)/benchmark
+
 test:
 	@set -e; \
 	mkdir -p $(TEST_BUILD_DIR); \
-	$(CC) $(CFLAGS) -c munit.c -o $(TEST_BUILD_DIR)/munit.o; \
+    $(CC) $(CFLAGS) -UGCM -UAES_GCM_GHASH_MODE -c munit.c -o $(TEST_BUILD_DIR)/munit.o; \
 	for key in 128 192 256; do \
 	  for mode in ecb cbc ctr ecb-cbc ecb-ctr cbc-ctr all; do \
 	    case $$mode in \
@@ -54,21 +88,26 @@ test:
 	      cbc-ctr) cbc=1; ecb=0; ctr=1 ;; \
 	      all) cbc=1; ecb=1; ctr=1 ;; \
 	    esac; \
-	    for sbox in 1 2 3; do \
-	      for wide in 0 1; do \
-	        name=$${key}-$${mode}-sbox$${sbox}-wide$${wide}; \
-	        $(CC) $(CFLAGS) -DCBC=$$cbc -DECB=$$ecb -DCTR=$$ctr \
-	          -DAES$${key}=1 -DAES_SBOX_MODE=$$sbox -DAES_WIDE_OPS=$$wide \
-	          -c aes.c -o $(TEST_BUILD_DIR)/aes-$${name}.o; \
-	        $(CC) $(CFLAGS) -DCBC=$$cbc -DECB=$$ecb -DCTR=$$ctr \
-	          -DAES$${key}=1 -DAES_SBOX_MODE=$$sbox -DAES_WIDE_OPS=$$wide \
-	          -c test.c -o $(TEST_BUILD_DIR)/test-$${name}.o; \
-	        $(CC) $(CFLAGS) -o $(TEST_BUILD_DIR)/test-$${name} \
-	          $(TEST_BUILD_DIR)/aes-$${name}.o \
-	          $(TEST_BUILD_DIR)/test-$${name}.o $(TEST_BUILD_DIR)/munit.o; \
-	        $(TEST_BUILD_DIR)/test-$${name}; \
-	      done; \
-	    done; \
+    for gcm in 0 1; do \
+      if [ $$gcm -eq 0 ]; then ghash_modes="0"; else ghash_modes="0 1 2 3 4"; fi; \
+      for ghash in $$ghash_modes; do \
+      for sbox in 1 2 3; do \
+        for wide in 0 1; do \
+          name=$${key}-$${mode}-gcm$${gcm}-ghash$${ghash}-sbox$${sbox}-wide$${wide}; \
+          $(CC) $(CFLAGS) -DCBC=$$cbc -DECB=$$ecb -DCTR=$$ctr -DGCM=$$gcm \
+          -DAES$${key}=1 -DAES_SBOX_MODE=$$sbox -DAES_WIDE_OPS=$$wide -DAES_GCM_GHASH_MODE=$$ghash \
+          -c aes.c -o $(TEST_BUILD_DIR)/aes-$${name}.o; \
+          $(CC) $(CFLAGS) -DCBC=$$cbc -DECB=$$ecb -DCTR=$$ctr -DGCM=$$gcm \
+          -DAES$${key}=1 -DAES_SBOX_MODE=$$sbox -DAES_WIDE_OPS=$$wide -DAES_GCM_GHASH_MODE=$$ghash \
+          -c test.c -o $(TEST_BUILD_DIR)/test-$${name}.o; \
+          $(CC) $(CFLAGS) -o $(TEST_BUILD_DIR)/test-$${name} \
+          $(TEST_BUILD_DIR)/aes-$${name}.o \
+          $(TEST_BUILD_DIR)/test-$${name}.o $(TEST_BUILD_DIR)/munit.o; \
+          $(TEST_BUILD_DIR)/test-$${name}; \
+      done; \
+      done; \
+      done; \
+    done; \
 	  done; \
 	done
 

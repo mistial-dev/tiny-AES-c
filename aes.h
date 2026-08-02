@@ -23,6 +23,27 @@
   #define CTR 1
 #endif
 
+#ifndef GCM
+  #define GCM 0
+#endif
+
+/* GCM GHASH implementation profiles. */
+#define AES_GCM_GHASH_MODE_AUTO       0
+#define AES_GCM_GHASH_MODE_BITWISE    1
+#define AES_GCM_GHASH_MODE_WIDE       2
+#define AES_GCM_GHASH_MODE_TABLE4     3
+#define AES_GCM_GHASH_MODE_FAST_TABLE 4
+#define AES_GCM_GHASH_MODE_HARDWARE   5
+
+#ifndef AES_GCM_GHASH_MODE
+  #define AES_GCM_GHASH_MODE AES_GCM_GHASH_MODE_AUTO
+#endif
+
+#if (AES_GCM_GHASH_MODE < AES_GCM_GHASH_MODE_AUTO) || \
+    (AES_GCM_GHASH_MODE > AES_GCM_GHASH_MODE_HARDWARE)
+  #error "AES_GCM_GHASH_MODE is invalid"
+#endif
+
 /*
  * S-box implementation modes:
  *   AES_SBOX_MODE_CONSTANT_TIME - fixed-size masked scan (default)
@@ -118,6 +139,61 @@ void AES_CBC_decrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length);
 void AES_CTR_xcrypt_buffer(struct AES_ctx* ctx, uint8_t* buf, size_t length);
 
 #endif // #if defined(CTR) && (CTR == 1)
+
+
+#if defined(GCM) && (GCM == 1)
+
+#define AES_GCM_SUCCESS 0
+#define AES_GCM_ERROR   (-1)
+
+struct AES_GCM_ctx
+{
+  struct AES_ctx aes;
+  uint8_t H[AES_BLOCKLEN];
+  uint8_t J0[AES_BLOCKLEN];
+  uint8_t counter[AES_BLOCKLEN];
+  uint8_t stream[AES_BLOCKLEN];
+  uint8_t S[AES_BLOCKLEN];
+  uint8_t ghash[AES_BLOCKLEN];
+#if (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_TABLE4) || \
+    (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_FAST_TABLE)
+      uint8_t ghash_table[32][16][AES_BLOCKLEN];
+#endif
+  uint64_t aad_len;
+  uint64_t text_len;
+  size_t stream_pos;
+  size_t ghash_len;
+  uint8_t phase;
+  uint8_t direction;
+};
+
+/*
+ * Initialize GCM with a key and nonce. The nonce may have any non-zero
+ * length; the 96-bit form is the fast path recommended by NIST SP 800-38D.
+ */
+int AES_GCM_init(struct AES_GCM_ctx* ctx, const uint8_t* key,
+                 const uint8_t* iv, size_t iv_len);
+
+/* AAD must be supplied before the first encrypt/decrypt update. A context is
+ * single-direction; reinitialize it before switching between encryption and
+ * decryption. Every update return value must be checked. */
+int AES_GCM_aad_update(struct AES_GCM_ctx* ctx, const uint8_t* aad,
+                       size_t length);
+int AES_GCM_encrypt_update(struct AES_GCM_ctx* ctx, uint8_t* buf,
+                           size_t length);
+int AES_GCM_decrypt_update(struct AES_GCM_ctx* ctx, uint8_t* buf,
+                           size_t length);
+
+/* Tag lengths permitted by SP 800-38D are 4, 8, and 12 through 16 bytes. */
+int AES_GCM_encrypt_finish(struct AES_GCM_ctx* ctx, uint8_t* tag,
+                           size_t tag_len);
+int AES_GCM_decrypt_finish(struct AES_GCM_ctx* ctx, const uint8_t* tag,
+                           size_t tag_len);
+
+/* Clear expanded key material and intermediate authentication state. */
+void AES_GCM_clear(struct AES_GCM_ctx* ctx);
+
+#endif // #if defined(GCM) && (GCM == 1)
 
 
 #endif // _AES_H_

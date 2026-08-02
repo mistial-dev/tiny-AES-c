@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Added opt-in, streaming AES-GCM support with arbitrary IV lengths, compact
+  NIST CAVP vectors, authenticated tag verification, a block-wise update path,
+  and configurable constant-time, wide, table-based, and hardware GHASH
+  profiles. The default remains heap-free and constant-time, GCM-disabled
+  builds retain no GCM context or runtime overhead, and each context rejects
+  mixed encryption/decryption updates. Documented GCM usage, nonce and
+  authentication requirements, in-place decryption precautions, profile
+  trade-offs, and expanded the test matrix to cover all portable GHASH modes.
 - Added configurable secure, runtime-generated, and fast S-box profiles plus
   portable opt-in wide operations for embedded targets.
 - Made AES-128 the default only when no AES key-size macro is supplied, so
