@@ -8,6 +8,11 @@ SPDX-License-Identifier: Unlicense
 
 ## Unreleased
 
+### Added
+
+- [Bounded Contribution Policy](CODE_OF_CONDUCT.md) (OpenPhysical v2.0.3),
+  [CONTRIBUTING.md](CONTRIBUTING.md), and GitHub issue/PR templates.
+
 ### BREAKING
 
 - Status codes are only `AES_OK` / `AES_ERR`. Per-mode `AES_*_SUCCESS` and

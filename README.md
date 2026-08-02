@@ -8,6 +8,7 @@ SPDX-License-Identifier: Unlicense
 [![CI](https://github.com/mistial-dev/tiny-AES-c/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/mistial-dev/tiny-AES-c/actions/workflows/ci.yml)
 [![C99](https://img.shields.io/badge/C-99-00599C?logo=c&logoColor=white)](https://en.cppreference.com/w/c/language)
 [![Heap-free](https://img.shields.io/badge/heap-free-informational)](#overview)
+[![Bounded Contribution Policy](https://img.shields.io/badge/Contribution%20Policy-Bounded-blue)](https://github.com/OpenPhysical/BoundedContributionPolicy)
 
 # Tiny AES in C
 
@@ -345,7 +346,17 @@ Unit tests use vendored µunit. Vectors under `test_vectors/` include NIST SP
 C12.22 EAX′ notes; SIV RFC 5297 / Wycheproof; and full AES-CMAC CAVP Gen/Ver
 plus Wycheproof.
 
+## Contributing
+
+This project uses the [Bounded Contribution Policy](CODE_OF_CONDUCT.md) to keep
+discussions and contributions focused on technical goals. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for build/test expectations and PR guidance.
+Sister DES/3DES library: [tiny-DES-c](https://github.com/mistial-dev/tiny-DES-c).
+
 ## License
 
 AES implementation: public domain (Unlicense). Vendored µunit: MIT.
 Upstream contributors are credited in the original project history.
+Contribution policy:
+[OpenPhysical BoundedContributionPolicy](https://github.com/OpenPhysical/BoundedContributionPolicy).
+

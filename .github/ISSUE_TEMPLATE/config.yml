@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Bounded Contribution Policy
+    url: https://github.com/mistial-dev/tiny-AES-c/blob/master/CODE_OF_CONDUCT.md
+    about: Project scope and contribution evaluation criteria
+  - name: Sister project (tiny-DES-c)
+    url: https://github.com/mistial-dev/tiny-DES-c
+    about: DES/3DES sibling library — open DES-specific issues there
