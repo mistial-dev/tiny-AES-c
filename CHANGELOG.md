@@ -42,7 +42,8 @@ SPDX-License-Identifier: Unlicense
 - `AES_STRICT` optional NULL checks on classical buffer APIs.
 - One-shot `AES_GCM_encrypt` / `AES_GCM_decrypt` (auth-before-release decrypt).
 - `AES_TINY` compile-time rejection of table4/fast-table GHASH.
-- `AES_GCM_SHARED_TABLE` for a single BSS 8 KiB GHASH table.
+- One-shot AEAD buffer contract: exact alias or fully disjoint only;
+  partial overlap returns `AES_ERR`.
 - README rewritten for MCU use: gating, sizeof table, RTOS notes, examples, and
   residual risks.
 
@@ -50,6 +51,13 @@ SPDX-License-Identifier: Unlicense
 
 - CCM/EAX/EAX' one-shots use packed stack workspaces for predictable depth.
 - Professional documentation tone; accurate default-mode gating.
+- Removed `AES_GCM_SHARED_TABLE` (unsafe when multiple keys share the table).
+  Table GHASH is per-context only.
+- CTR wrap checks are portable to 16-bit `size_t` (AVR).
+- One-shot GCM validates lengths and buffer overlap before any output copy.
+- README: CBC requires an **unpredictable** IV, not merely a unique one.
+- Sparse matrix coverage for `AES_STRICT=1`, `AES_ZEROIZE=0`, `AES_TINY=1`,
+  and multi-key GCM contexts.
 
 - Added opt-in ANSI C12.22 EAX' support with Annex I.4 interoperability
   coverage, twelve boundary-focused worked vectors, and an OpenSSL-based

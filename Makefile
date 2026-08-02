@@ -20,7 +20,6 @@ AES_CAVP ?= 0
 AES_ZEROIZE ?= 1
 AES_STRICT ?= 0
 AES_TINY ?= 0
-AES_GCM_SHARED_TABLE ?= 0
 AES_GCM_GHASH_MODE ?= auto
 BENCHMARK_BYTES ?= 16384
 BENCHMARK_ITERATIONS ?= 100
@@ -71,7 +70,7 @@ $(error AES_GCM_GHASH_MODE must be auto, bitwise, wide, table4, fast-table, or h
 endif
 CONFIG_DEFINITIONS = $(MODE_DEFINITIONS) $(SBOX_DEFINITION) $(WIDE_DEFINITION) \
   $(GHASH_DEFINITION) -DAES_ZEROIZE=$(AES_ZEROIZE) -DAES_STRICT=$(AES_STRICT) \
-  -DAES_TINY=$(AES_TINY) -DAES_GCM_SHARED_TABLE=$(AES_GCM_SHARED_TABLE)
+  -DAES_TINY=$(AES_TINY)
 
 .PHONY: all clean size test benchmark
 
@@ -123,7 +122,24 @@ test:
 	  if [ "$$key" -eq 128 ]; then for sbox in 1 2 3; do build_and_run $$key eax-prime 0 0 0 0 0 0 0 0 $$sbox 0; done; fi; \
 	  for sbox in 1 2 3; do build_and_run $$key siv 0 0 0 0 0 0 0 0 $$sbox 0; done; \
 	  if [ "$(AES_CAVP)" -eq 0 ]; then build_and_run $$key all 1 1 1 1 1 1 1 0 1 1; fi; \
-	done
+	done; \
+	# Sparse config-profile builds (not multiplied across the mode matrix). \
+	$(CC) $(CFLAGS) -UCBC -UECB -UCTR -UOFB -UGCM -UCCM -UEAX -USIV -c munit.c -o $(TEST_BUILD_DIR)/munit.o; \
+	run_cfg() { \
+	  name=$$1; shift; \
+	  common="$(CFLAGS) $$* -DCAVP_VECTOR_DIR=\"test_vectors/cavp\" -DEAX_VECTOR_FILE=\"test_vectors/eax/aes_eax_test.json\" -DSIV_VECTOR_FILE=\"test_vectors/siv/aead_aes_siv_cmac_test.json\""; \
+	  $(CC) $${common} -c aes.c -o $(TEST_BUILD_DIR)/aes-cfg-$${name}.o; \
+	  $(CC) $${common} -c test.c -o $(TEST_BUILD_DIR)/test-cfg-$${name}.o; \
+	  $(CC) $${common} -c cavp.c -o $(TEST_BUILD_DIR)/cavp-cfg-$${name}.o; \
+	  $(CC) $${common} -c eax_test.c -o $(TEST_BUILD_DIR)/eax-cfg-$${name}.o; \
+	  $(CC) $${common} -c siv_test.c -o $(TEST_BUILD_DIR)/siv-cfg-$${name}.o; \
+	  $(CC) $(CFLAGS) -o $(TEST_BUILD_DIR)/test-cfg-$${name} $(TEST_BUILD_DIR)/aes-cfg-$${name}.o $(TEST_BUILD_DIR)/test-cfg-$${name}.o $(TEST_BUILD_DIR)/cavp-cfg-$${name}.o $(TEST_BUILD_DIR)/eax-cfg-$${name}.o $(TEST_BUILD_DIR)/siv-cfg-$${name}.o $(TEST_BUILD_DIR)/munit.o; \
+	  $(TEST_BUILD_DIR)/test-cfg-$${name}; \
+	}; \
+	run_cfg strict-ctr -DCBC=0 -DECB=0 -DCTR=1 -DOFB=0 -DGCM=0 -DCCM=0 -DEAX=0 -DEAX_PRIME=0 -DSIV=0 -DAES128=1 -DAES_STRICT=1 -DAES_ZEROIZE=1 -DAES_SBOX_MODE=1 -DAES_WIDE_OPS=0; \
+	run_cfg zeroize-off -DCBC=0 -DECB=0 -DCTR=1 -DOFB=0 -DGCM=0 -DCCM=0 -DEAX=0 -DEAX_PRIME=0 -DSIV=0 -DAES128=1 -DAES_STRICT=0 -DAES_ZEROIZE=0 -DAES_SBOX_MODE=1 -DAES_WIDE_OPS=0; \
+	run_cfg tiny-gcm -DCBC=0 -DECB=0 -DCTR=0 -DOFB=0 -DGCM=1 -DCCM=0 -DEAX=0 -DEAX_PRIME=0 -DSIV=0 -DAES128=1 -DAES_TINY=1 -DAES_GCM_GHASH_MODE=0 -DAES_SBOX_MODE=1 -DAES_WIDE_OPS=0; \
+	run_cfg multi-gcm -DCBC=0 -DECB=0 -DCTR=0 -DOFB=0 -DGCM=1 -DCCM=0 -DEAX=0 -DEAX_PRIME=0 -DSIV=0 -DAES128=1 -DAES_GCM_GHASH_MODE=0 -DAES_SBOX_MODE=1 -DAES_WIDE_OPS=0 -DGCM_MULTI_KEY_TEST=1
 
 clean:
 	rm -f aes.o

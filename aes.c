@@ -256,6 +256,30 @@ void AES_ctx_clear(struct AES_ctx* ctx)
   AES_secure_zero(ctx, sizeof(*ctx));
 }
 
+#if (defined(GCM) && (GCM == 1)) || (defined(CCM) && (CCM == 1)) || \
+    (defined(EAX) && (EAX == 1)) || (defined(EAX_PRIME) && (EAX_PRIME == 1)) || \
+    (defined(SIV) && (SIV == 1))
+/*
+ * Buffer relationship for one-shot in/out pairs:
+ *   exact alias (same pointer) — OK
+ *   completely disjoint — OK
+ *   partial overlap — not OK (AES_ERR)
+ * Empty lengths are always OK.
+ */
+static int aes_buffers_ok(const void* a, size_t a_len,
+                          const void* b, size_t b_len)
+{
+  const uint8_t* pa = (const uint8_t*)a;
+  const uint8_t* pb = (const uint8_t*)b;
+
+  if (a_len == 0 || b_len == 0 || pa == pb)
+    return 1;
+  if (pa + a_len <= pb || pb + b_len <= pa)
+    return 1;
+  return 0;
+}
+#endif
+
 static uint8_t xtime(uint8_t x)
 {
   return ((x<<1) ^ (((x>>7) & 1) * 0x1b));
@@ -759,15 +783,21 @@ int AES_CBC_decrypt(struct AES_ctx* ctx, uint8_t* buf, size_t length)
 
 #if defined(CTR) && (CTR == 1)
 
-/* Blocks of keystream remaining before the 128-bit counter wraps to zero. */
+/*
+ * Blocks of keystream remaining before the 128-bit counter wraps to zero.
+ * Portable to 16-bit size_t (AVR): never shift size_t by more than
+ * 8*(sizeof(size_t)-1) bits.
+ */
 static int ctr_blocks_until_wrap(const uint8_t iv[AES_BLOCKLEN], size_t needed)
 {
   uint8_t remaining[AES_BLOCKLEN];
   uint8_t bi;
   size_t blocks = 0;
+  size_t start;
   uint8_t carry;
+  uint8_t all_zero = 1;
 
-  /* remaining = 0x100...00 - iv, as a big-endian 128-bit distance to wrap. */
+  /* remaining = 2^128 - iv (big-endian two's complement distance to wrap). */
   carry = 0;
   for (bi = AES_BLOCKLEN; bi > 0; --bi)
   {
@@ -776,30 +806,29 @@ static int ctr_blocks_until_wrap(const uint8_t iv[AES_BLOCKLEN], size_t needed)
     remaining[idx] = (uint8_t)diff;
     carry = (uint8_t)(iv[idx] != 0 || carry != 0 ? 1u : 0u);
   }
-  /* If iv is all zero, distance is 2^128 blocks; any practical needed fits. */
-  {
-    uint8_t all_zero = 1;
-    for (bi = 0; bi < AES_BLOCKLEN; ++bi)
-    {
-      if (iv[bi] != 0)
-      {
-        all_zero = 0;
-        break;
-      }
-    }
-    if (all_zero)
-      return 1;
-  }
 
-  /* Compare needed (as block count) against remaining, without 128-bit math:
-   * if any of the high 12 bytes of remaining is non-zero, remaining is huge. */
-  for (bi = 0; bi < 12; ++bi)
+  for (bi = 0; bi < AES_BLOCKLEN; ++bi)
+  {
+    if (iv[bi] != 0)
+    {
+      all_zero = 0;
+      break;
+    }
+  }
+  /* IV all zero: remaining is 2^128 blocks (beyond any size_t length). */
+  if (all_zero)
+    return 1;
+
+  /* If any high byte beyond sizeof(size_t) is set, remaining exceeds size_t. */
+  start = AES_BLOCKLEN - sizeof(size_t);
+  for (bi = 0; bi < (uint8_t)start; ++bi)
   {
     if (remaining[bi] != 0)
       return 1;
   }
-  blocks = ((size_t)remaining[12] << 24) | ((size_t)remaining[13] << 16) |
-           ((size_t)remaining[14] << 8) | (size_t)remaining[15];
+  for (; bi < AES_BLOCKLEN; ++bi)
+    blocks = (blocks << 8) | (size_t)remaining[bi];
+
   return needed <= blocks;
 }
 
@@ -832,7 +861,8 @@ int AES_CTR_crypt(struct AES_ctx* ctx, uint8_t* buf, size_t length)
   if (length == 0)
     return AES_OK;
 
-  blocks_needed = (length + AES_BLOCKLEN - 1u) / AES_BLOCKLEN;
+  /* Avoid (length + 15) overflow on large length with small size_t. */
+  blocks_needed = length / AES_BLOCKLEN + ((length % AES_BLOCKLEN) != 0 ? 1u : 0u);
   if (!ctr_blocks_until_wrap(ctx->Iv, blocks_needed))
     return AES_ERR;
 
@@ -982,13 +1012,7 @@ static void gcm_multiply_wide(uint8_t* result, const uint8_t* left,
 #if (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_TABLE4) || \
     (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_FAST_TABLE)
 
-#if AES_GCM_SHARED_TABLE
-static uint8_t gcm_shared_table[32][16][AES_BLOCKLEN];
-#define GCM_TABLE_REF gcm_shared_table
-#else
-#define GCM_TABLE_REF (ctx->ghash_table)
-#endif
-
+/* Per-context table only: a shared table cannot safely serve multiple keys. */
 static void gcm_init_table(struct AES_GCM_ctx* ctx)
 {
   uint8_t input[AES_BLOCKLEN];
@@ -1002,7 +1026,7 @@ static void gcm_init_table(struct AES_GCM_ctx* ctx)
       memset(input, 0, AES_BLOCKLEN);
       input[position / 2u] = (uint8_t)((position % 2u) == 0u ?
         (uint8_t)(entry << 4) : entry);
-      gcm_multiply_bitwise(GCM_TABLE_REF[position][entry], input, ctx->H);
+      gcm_multiply_bitwise(ctx->ghash_table[position][entry], input, ctx->H);
     }
   }
 }
@@ -1032,18 +1056,14 @@ static void gcm_multiply_table4(uint8_t* result, const uint8_t* left,
   uint8_t position;
   uint8_t i;
 
-#if AES_GCM_SHARED_TABLE
-  (void) ctx;
-#endif
-
   for (position = 0; position < 32; ++position)
   {
     const uint8_t nibble = (uint8_t)((position % 2u) == 0u ?
       left[position / 2u] >> 4 : left[position / 2u] & 0x0fu);
 #if AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_FAST_TABLE
-    aes_copy_bytes(selected, GCM_TABLE_REF[position][nibble], AES_BLOCKLEN);
+    aes_copy_bytes(selected, ctx->ghash_table[position][nibble], AES_BLOCKLEN);
 #else
-    gcm_select_table4(selected, GCM_TABLE_REF[position], nibble);
+    gcm_select_table4(selected, ctx->ghash_table[position], nibble);
 #endif
     for (i = 0; i < AES_BLOCKLEN; ++i)
       value[i] ^= selected[i];
@@ -1432,8 +1452,23 @@ int AES_GCM_encrypt(const uint8_t* key,
   if (key == NULL || iv == NULL || iv_len == 0 ||
       (aad_len != 0 && aad == NULL) ||
       (plaintext_len != 0 && (plaintext == NULL || ciphertext == NULL)) ||
-      tag == NULL)
+      tag == NULL ||
+      !gcm_tag_length_is_valid(tag_len) ||
+      (uint64_t)iv_len > AES_GCM_MAX_IV_BYTES ||
+      (uint64_t)aad_len > AES_GCM_MAX_AAD_BYTES ||
+      (uint64_t)plaintext_len > AES_GCM_MAX_PLAINTEXT_BYTES ||
+      !aes_buffers_ok(plaintext, plaintext_len, ciphertext, plaintext_len))
     return AES_ERR;
+
+  /* Short-tag Appendix C packet bound before any output write. */
+  if (tag_len == 4 || tag_len == 8)
+  {
+    const uint64_t limit = (tag_len == 4) ? AES_GCM_SHORT_TAG4_MAX_PACKET
+                                          : AES_GCM_SHORT_TAG8_MAX_PACKET;
+    if ((uint64_t)aad_len > limit ||
+        (uint64_t)plaintext_len > limit - (uint64_t)aad_len)
+      return AES_ERR;
+  }
 
   if (AES_GCM_init(&ctx, key, iv, iv_len, tag_len) != AES_OK)
     return AES_ERR;
@@ -1445,6 +1480,7 @@ int AES_GCM_encrypt(const uint8_t* key,
     return AES_ERR;
   }
 
+  /* Copy only after all length/overlap checks and AAD accept. */
   if (plaintext != ciphertext && plaintext_len != 0)
     aes_copy_bytes(ciphertext, plaintext, plaintext_len);
 
@@ -1474,8 +1510,22 @@ int AES_GCM_decrypt(const uint8_t* key,
   if (key == NULL || iv == NULL || iv_len == 0 ||
       (aad_len != 0 && aad == NULL) ||
       (ciphertext_len != 0 && (ciphertext == NULL || plaintext == NULL)) ||
-      tag == NULL)
+      tag == NULL ||
+      !gcm_tag_length_is_valid(tag_len) ||
+      (uint64_t)iv_len > AES_GCM_MAX_IV_BYTES ||
+      (uint64_t)aad_len > AES_GCM_MAX_AAD_BYTES ||
+      (uint64_t)ciphertext_len > AES_GCM_MAX_PLAINTEXT_BYTES ||
+      !aes_buffers_ok(ciphertext, ciphertext_len, plaintext, ciphertext_len))
     return AES_ERR;
+
+  if (tag_len == 4 || tag_len == 8)
+  {
+    const uint64_t limit = (tag_len == 4) ? AES_GCM_SHORT_TAG4_MAX_PACKET
+                                          : AES_GCM_SHORT_TAG8_MAX_PACKET;
+    if ((uint64_t)aad_len > limit ||
+        (uint64_t)ciphertext_len > limit - (uint64_t)aad_len)
+      return AES_ERR;
+  }
 
   if (AES_GCM_init(&ctx, key, iv, iv_len, tag_len) != AES_OK)
     return AES_ERR;
@@ -1686,7 +1736,8 @@ static int ccm_crypt(const uint8_t* key, const uint8_t* nonce,
       nonce_len < AES_CCM_MIN_NONCE_LEN || nonce_len > AES_CCM_MAX_NONCE_LEN ||
       !ccm_tag_length_is_valid(tag_len) ||
       !ccm_payload_length_is_valid(nonce_len, input_len) ||
-      (uint64_t)aad_len > UINT64_MAX)
+      (uint64_t)aad_len > UINT64_MAX ||
+      !aes_buffers_ok(input, input_len, output, input_len))
     return AES_ERR;
 
   memset(&st, 0, sizeof(st));
@@ -2008,7 +2059,8 @@ static int eax_crypt(const uint8_t* key, const uint8_t* nonce,
   if (key == NULL || (nonce_len != 0 && nonce == NULL) ||
       (aad_len != 0 && aad == NULL) ||
       (input_len != 0 && (input == NULL || output == NULL)) ||
-      tag == NULL || tag_len < AES_EAX_MIN_TAG_LEN || tag_len > AES_BLOCKLEN)
+      tag == NULL || tag_len < AES_EAX_MIN_TAG_LEN || tag_len > AES_BLOCKLEN ||
+      !aes_buffers_ok(input, input_len, output, input_len))
     return AES_ERR;
 
   AES_init_ctx(&st.aes, key);
@@ -2087,7 +2139,8 @@ static int eax_prime_crypt(const uint8_t* key, const uint8_t* cleartext,
   int status = AES_ERR;
 
   if (key == NULL || (cleartext_len != 0 && cleartext == NULL) ||
-      (input_len != 0 && (input == NULL || output == NULL)) || tag == NULL)
+      (input_len != 0 && (input == NULL || output == NULL)) || tag == NULL ||
+      !aes_buffers_ok(input, input_len, output, input_len))
     return AES_ERR;
 
   AES_init_ctx(&st.aes, key);
@@ -2365,7 +2418,8 @@ static int siv_crypt(const uint8_t* key, const uint8_t* const* ad,
 
   if (key == NULL || (ad_count != 0 && (ad == NULL || ad_lens == NULL)) ||
       ad_count > AES_SIV_MAX_AD ||
-      (input_len != 0 && (input == NULL || output == NULL)) || v == NULL)
+      (input_len != 0 && (input == NULL || output == NULL)) || v == NULL ||
+      !aes_buffers_ok(input, input_len, output, input_len))
     return AES_ERR;
 
   for (i = 0; i < ad_count; ++i)

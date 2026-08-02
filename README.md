@@ -64,7 +64,6 @@ and/or `EAX_PRIME` to `1` before including `aes.h`.
 | `AES_STRICT` | 0 | NULL checks on classical buffer APIs |
 | `AES_TINY` | 0 | `#error` if GHASH is table4/fast-table |
 | `AES_EAX_MIN_TAG_LEN` | 8 | Minimum EAX tag length |
-| `AES_GCM_SHARED_TABLE` | 0 | One shared 8 KiB GHASH table (BSS) |
 | `AES_GCM_GHASH_MODE` | auto | bitwise / wide / table4 / fast-table / hardware |
 
 Make examples:
@@ -72,7 +71,7 @@ Make examples:
 ```text
 make AES_SBOX_MODE=secure AES_WIDE_OPS=off AES_ZEROIZE=1
 make AES_ENABLE_GCM=1 AES_TINY=1 AES_GCM_GHASH_MODE=bitwise
-make AES_ENABLE_GCM=1 AES_GCM_GHASH_MODE=table4 AES_GCM_SHARED_TABLE=1
+make AES_ENABLE_GCM=1 AES_GCM_GHASH_MODE=table4
 ```
 
 ## Memory footprint
@@ -86,10 +85,9 @@ structure layout may differ slightly; measure with your toolchain.
 | No IV modes (key schedule only) | 176 | — |
 | GCM, auto/bitwise GHASH | 176 | **312** |
 | GCM, table4 (per-context table) | 176 | **~8504** |
-| GCM, table4 + `AES_GCM_SHARED_TABLE` | 176 | **312** (+ 8 KiB BSS) |
 
 `AES_TINY=1` rejects table4/fast-table at compile time. Prefer bitwise/auto GHASH
-or a shared table on small devices.
+on small devices; table modes always store ~8 KiB **per context**.
 
 One-shot CCM/EAX/EAX′ keep a packed workspace on the stack (one `AES_ctx` plus
 a few 16-byte blocks). There are no VLAs and no recursive paths.
@@ -261,15 +259,19 @@ On tiny MCUs prefer: 16-byte tags, 12-byte IVs, one-shot GCM, and
 - Prefer one context per owner (task or connection).
 - `AES_init_sbox()` (runtime S-box profile) must run once before first use,
   under single-threaded init.
-- With `AES_GCM_SHARED_TABLE=1`, serialize `AES_GCM_init` across tasks.
 - AES is usually too heavy for short ISRs; measure stack and latency on target.
 - Wipe keys with `AES_ctx_clear` / `AES_GCM_clear` / `AES_secure_zero` before
   returning buffers to pools.
 
 ## Security notes
 
-- **Nonce/IV uniqueness** under a key is the caller's responsibility. Reuse
-  destroys security for CTR, OFB, CBC, CCM, EAX, and GCM.
+- **IV / nonce requirements** (caller responsibility):
+  - **CTR / OFB / CCM / EAX / GCM / SIV:** never reuse a nonce/IV with the same
+    key (SIV is misuse-resistant but still degrades on reuse).
+  - **CBC encryption:** the IV must be **unpredictable** (typically random) at
+    the time the plaintext is chosen; uniqueness alone is not enough.
+- **One-shot AEAD buffers:** exact in-place alias and fully disjoint buffers
+  are OK; **partial overlap returns `AES_ERR`**.
 - **No padding** is provided. CBC/ECB lengths must be multiples of 16 bytes.
 - CBC rejects non-aligned lengths with `AES_ERR`. CTR rejects requests that
   would wrap the 128-bit counter (buffer and IV left unchanged).

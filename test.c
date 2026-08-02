@@ -726,6 +726,7 @@ static MunitResult test_gcm_oneshot(const MunitParameter params[], void* data)
   uint8_t tag[16];
   uint8_t bad_tag[16];
   uint8_t poison[64];
+  uint8_t overlap[64];
   size_t i;
 
   (void) params;
@@ -769,8 +770,76 @@ static MunitResult test_gcm_oneshot(const MunitParameter params[], void* data)
   for (i = 0; i < vector->length; ++i)
     munit_assert_uint8(ciphertext[i], ==, 0);
 
+  /* Partial overlap is rejected before any write. */
+  memcpy(overlap, vector->plaintext, vector->length);
+  munit_assert_int(AES_GCM_encrypt(vector->key, vector->iv, vector->iv_len,
+                                   vector->aad, vector->aad_len,
+                                   overlap, vector->length,
+                                   overlap + 1, tag, vector->tag_len), ==,
+                   AES_ERR);
+  munit_assert_memory_equal(vector->length, overlap, vector->plaintext);
+
   return MUNIT_OK;
 }
+
+#if defined(GCM_MULTI_KEY_TEST) && (GCM_MULTI_KEY_TEST == 1)
+/* Two contexts, two keys: both must work independently (per-context state). */
+static MunitResult test_gcm_multi_key(const MunitParameter params[], void* data)
+{
+  static const uint8_t key_b[16] = {
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+    0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f
+  };
+  const struct gcm_test_vector* va = &TEST_GCM_VECTOR;
+  struct AES_GCM_ctx ctx_a;
+  struct AES_GCM_ctx ctx_b;
+  uint8_t buf_a[32];
+  uint8_t buf_b[32];
+  uint8_t tag_a[16];
+  uint8_t tag_b[16];
+  uint8_t expect_b[32];
+
+  (void) params;
+  (void) data;
+
+  test_initialize_sbox();
+  munit_assert_size(va->length, <=, sizeof(buf_a));
+
+  memcpy(buf_a, va->plaintext, va->length);
+  munit_assert_int(AES_GCM_init(&ctx_a, va->key, va->iv, va->iv_len,
+                                va->tag_len), ==, AES_OK);
+  munit_assert_int(AES_GCM_aad_update(&ctx_a, va->aad, va->aad_len), ==, AES_OK);
+  munit_assert_int(AES_GCM_encrypt_update(&ctx_a, buf_a, va->length), ==, AES_OK);
+  munit_assert_int(AES_GCM_encrypt_finish(&ctx_a, tag_a), ==, AES_OK);
+
+  memcpy(buf_b, va->plaintext, va->length);
+  munit_assert_int(AES_GCM_init(&ctx_b, key_b, va->iv, va->iv_len,
+                                va->tag_len), ==, AES_OK);
+  munit_assert_int(AES_GCM_aad_update(&ctx_b, va->aad, va->aad_len), ==, AES_OK);
+  munit_assert_int(AES_GCM_encrypt_update(&ctx_b, buf_b, va->length), ==, AES_OK);
+  munit_assert_int(AES_GCM_encrypt_finish(&ctx_b, tag_b), ==, AES_OK);
+
+  /* Different keys must not produce the same ciphertext/tag as the vector. */
+  munit_assert_memory_equal(va->length, buf_a, va->ciphertext);
+  munit_assert_memory_equal(va->tag_len, tag_a, va->tag);
+  munit_assert_memory_not_equal(va->length, buf_b, va->ciphertext);
+
+  /* Context A remains valid after B was initialized with another key. */
+  memcpy(expect_b, buf_b, va->length);
+  munit_assert_int(AES_GCM_init(&ctx_a, va->key, va->iv, va->iv_len,
+                                va->tag_len), ==, AES_OK);
+  munit_assert_int(AES_GCM_aad_update(&ctx_a, va->aad, va->aad_len), ==, AES_OK);
+  memcpy(buf_a, va->ciphertext, va->length);
+  munit_assert_int(AES_GCM_decrypt_update(&ctx_a, buf_a, va->length), ==, AES_OK);
+  munit_assert_int(AES_GCM_decrypt_finish(&ctx_a, tag_a), ==, AES_OK);
+  munit_assert_memory_equal(va->length, buf_a, va->plaintext);
+  munit_assert_memory_equal(va->length, buf_b, expect_b);
+
+  AES_GCM_clear(&ctx_a);
+  AES_GCM_clear(&ctx_b);
+  return MUNIT_OK;
+}
+#endif
 #endif
 
 static MunitTest test_suite_tests[] = {
@@ -809,6 +878,9 @@ static MunitTest test_suite_tests[] = {
   { "/gcm-oneshot", test_gcm_oneshot, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #if !defined(AES192) && !defined(AES256)
   { "/gcm-non96-iv", test_gcm_non96_iv, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+#endif
+#if defined(GCM_MULTI_KEY_TEST) && (GCM_MULTI_KEY_TEST == 1)
+  { "/gcm-multi-key", test_gcm_multi_key, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #endif
 #endif
 #if defined(EAX) && (EAX == 1)

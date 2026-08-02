@@ -79,9 +79,9 @@
 #endif
 
 /*
- * AES_TINY=1 rejects GHASH table profiles (~8.5 KiB per context by default).
- * AES_GCM_SHARED_TABLE=1 stores one file-scope 8 KiB table for all contexts
- * (serialize AES_GCM_init if used concurrently).
+ * AES_TINY=1 rejects GHASH table profiles (~8.5 KiB per context). Prefer
+ * bitwise/auto/wide GHASH on small MCUs. Table modes always use a per-context
+ * table (a shared table cannot safely serve multiple keys).
  */
 #ifndef AES_TINY
   #define AES_TINY 0
@@ -89,14 +89,6 @@
 
 #if (AES_TINY != 0) && (AES_TINY != 1)
   #error "AES_TINY must be 0 or 1"
-#endif
-
-#ifndef AES_GCM_SHARED_TABLE
-  #define AES_GCM_SHARED_TABLE 0
-#endif
-
-#if (AES_GCM_SHARED_TABLE != 0) && (AES_GCM_SHARED_TABLE != 1)
-  #error "AES_GCM_SHARED_TABLE must be 0 or 1"
 #endif
 
 /* GCM GHASH implementation profiles. */
@@ -271,10 +263,9 @@ struct AES_GCM_ctx
   uint8_t stream[AES_BLOCKLEN];
   uint8_t S[AES_BLOCKLEN];
   uint8_t ghash[AES_BLOCKLEN];
-#if ((AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_TABLE4) || \
-     (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_FAST_TABLE)) && \
-    (AES_GCM_SHARED_TABLE == 0)
-  /* ~8 KiB. Use AES_GCM_SHARED_TABLE=1 or avoid table modes on tiny MCUs. */
+#if (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_TABLE4) || \
+    (AES_GCM_GHASH_MODE == AES_GCM_GHASH_MODE_FAST_TABLE)
+  /* ~8 KiB per context; avoid with AES_TINY or use bitwise/auto GHASH. */
   uint8_t ghash_table[32][16][AES_BLOCKLEN];
 #endif
 
@@ -310,10 +301,11 @@ int AES_GCM_encrypt_finish(struct AES_GCM_ctx* ctx, uint8_t* tag);
 int AES_GCM_decrypt_finish(struct AES_GCM_ctx* ctx, const uint8_t* tag);
 
 /*
- * One-shot GCM. tag_len is fixed for this key use (SP 800-38D). Decrypt
- * authenticates before writing plaintext; on authentication failure a
- * non-aliasing plaintext buffer is left untouched and an in-place buffer is
- * zeroed. Prefer these helpers when the full message is known.
+ * One-shot GCM. tag_len is fixed for this key use (SP 800-38D).
+ * Buffer contract (all one-shot AEAD): exact alias of in/out is OK; fully
+ * disjoint is OK; partial overlap returns AES_ERR.
+ * Decrypt authenticates before releasing plaintext; on failure a non-aliasing
+ * output is left untouched and an in-place buffer is zeroed.
  */
 int AES_GCM_encrypt(const uint8_t* key,
                     const uint8_t* iv, size_t iv_len,

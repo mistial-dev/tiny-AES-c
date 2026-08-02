@@ -24,7 +24,6 @@ option(TINY_AES_WIDE_OPS "Enable portable native-width block helpers" OFF)
 option(TINY_AES_ZEROIZE "Wipe stack secrets in one-shot paths" ON)
 option(TINY_AES_STRICT "Enable NULL checks on classical buffer APIs" OFF)
 option(TINY_AES_TINY "Reject large GHASH table profiles at compile time" OFF)
-option(TINY_AES_GCM_SHARED_TABLE "Share one 8 KiB GHASH table across GCM contexts" OFF)
 set(TINY_AES_SBOX_MODE "secure" CACHE STRING "S-box mode: secure, runtime, or fast")
 set_property(CACHE TINY_AES_SBOX_MODE PROPERTY STRINGS secure runtime fast)
 set(TINY_AES_GCM_GHASH_MODE "auto" CACHE STRING "GHASH mode: auto, bitwise, wide, table4, fast-table, or hardware")
@@ -135,12 +134,6 @@ if(TINY_AES_TINY)
 else()
     set(TINY_AES_TINY_VALUE 0)
 endif()
-if(TINY_AES_GCM_SHARED_TABLE)
-    set(TINY_AES_GCM_SHARED_TABLE_VALUE 1)
-else()
-    set(TINY_AES_GCM_SHARED_TABLE_VALUE 0)
-endif()
-
 list(APPEND tiny_aes_library_definitions GCM=${TINY_AES_GCM}
     CCM=${TINY_AES_CCM}
     EAX_PRIME=${TINY_AES_EAX_PRIME}
@@ -148,7 +141,6 @@ list(APPEND tiny_aes_library_definitions GCM=${TINY_AES_GCM}
     AES_ZEROIZE=${TINY_AES_ZEROIZE_VALUE}
     AES_STRICT=${TINY_AES_STRICT_VALUE}
     AES_TINY=${TINY_AES_TINY_VALUE}
-    AES_GCM_SHARED_TABLE=${TINY_AES_GCM_SHARED_TABLE_VALUE}
     ${TINY_AES_GCM_GHASH_DEFINITION})
 
 add_library(tiny-aes STATIC aes.c)
