@@ -888,7 +888,6 @@ int AES_OFB_crypt(struct AES_ctx* ctx, uint8_t* buf, size_t length)
 #define AES_GCM_DIRECTION_NONE    0u
 #define AES_GCM_DIRECTION_ENCRYPT 1u
 #define AES_GCM_DIRECTION_DECRYPT 2u
-#define AES_GCM_MAX_TEXT_BYTES ((((uint64_t)1) << 36) - 32u)
 
 static void gcm_store_be64(uint8_t* dst, uint64_t value)
 {
@@ -1193,11 +1192,8 @@ static void gcm_finish_ghash(struct AES_GCM_ctx* ctx)
 }
 
 /*
- * NIST SP 800-38D §5.2.1.2: the tag bit length t shall be one of
- *   128, 120, 112, 104, 96, 64, or 32
- * (bytes: 16, 15, 14, 13, 12, 8, or 4). No other lengths are permitted.
- * An implementation may support a subset; this library accepts the full set.
- * Tags of 32 and 64 bits have additional usage limits in Appendix C.
+ * SP 800-38D §5.2.1.2: t ∈ {128,120,112,104,96,64,32} bits only.
+ * Fixed for the key for the life of the context (set at init).
  */
 static int gcm_tag_length_is_valid(size_t tag_len)
 {
@@ -1206,26 +1202,57 @@ static int gcm_tag_length_is_valid(size_t tag_len)
          tag_len == 4;
 }
 
+/*
+ * Appendix C packet bound for short tags only (most permissive table row).
+ * 96–128 bit tags have no Appendix C size cap. Overflow-safe for MCU math.
+ * Lifetime decryption-invocation limits are not tracked here (no NVRAM/key
+ * store); the application must rotate keys per Appendix C.
+ */
+static int gcm_packet_length_ok(const struct AES_GCM_ctx* ctx,
+                                uint64_t extra_text)
+{
+  uint64_t limit;
+  uint64_t used;
+
+  if (ctx->tag_len != 4 && ctx->tag_len != 8)
+    return 1;
+
+  limit = (ctx->tag_len == 4) ? AES_GCM_SHORT_TAG4_MAX_PACKET
+                              : AES_GCM_SHORT_TAG8_MAX_PACKET;
+  if (extra_text > limit)
+    return 0;
+  used = ctx->aad_len + ctx->text_len;
+  if (used > limit - extra_text)
+    return 0;
+  return 1;
+}
+
 static void gcm_make_tag(const struct AES_GCM_ctx* ctx, uint8_t* tag)
 {
   uint8_t mask[AES_BLOCKLEN];
   uint8_t hash[AES_BLOCKLEN];
-  unsigned i;
+  uint8_t i;
 
   aes_copy_bytes(mask, ctx->J0, AES_BLOCKLEN);
   Cipher((state_t*)mask, ctx->aes.RoundKey);
   aes_copy_bytes(hash, ctx->S, AES_BLOCKLEN);
-  for (i = 0; i < AES_BLOCKLEN; ++i)
+  /* MSBt truncation: leading tag_len bytes of the 128-bit block. */
+  for (i = 0; i < ctx->tag_len; ++i)
     tag[i] = (uint8_t)(mask[i] ^ hash[i]);
+#if AES_ZEROIZE
+  AES_secure_zero(mask, sizeof(mask));
+  AES_secure_zero(hash, sizeof(hash));
+#endif
 }
 
 int AES_GCM_init(struct AES_GCM_ctx* ctx, const uint8_t* key,
-                 const uint8_t* iv, size_t iv_len)
+                 const uint8_t* iv, size_t iv_len, size_t tag_len)
 {
   uint8_t zero[AES_BLOCKLEN] = { 0 };
 
   if (ctx == NULL || key == NULL || iv == NULL || iv_len == 0 ||
-      (uint64_t)iv_len > UINT64_MAX / 8u)
+      (uint64_t)iv_len > AES_GCM_MAX_IV_BYTES ||
+      !gcm_tag_length_is_valid(tag_len))
     return AES_ERR;
 
   AES_init_ctx(&ctx->aes, key);
@@ -1243,6 +1270,7 @@ int AES_GCM_init(struct AES_GCM_ctx* ctx, const uint8_t* key,
   ctx->text_len = 0;
   ctx->stream_pos = AES_BLOCKLEN;
   ctx->ghash_len = 0;
+  ctx->tag_len = (uint8_t)tag_len;
   ctx->phase = AES_GCM_PHASE_AAD;
   ctx->direction = AES_GCM_DIRECTION_NONE;
   return AES_OK;
@@ -1253,7 +1281,10 @@ int AES_GCM_aad_update(struct AES_GCM_ctx* ctx, const uint8_t* aad,
 {
   if (ctx == NULL || ctx->phase != AES_GCM_PHASE_AAD ||
       (length != 0 && aad == NULL) ||
-      !gcm_length_is_valid(ctx->aad_len, length, UINT64_MAX / 8u))
+      !gcm_length_is_valid(ctx->aad_len, length, AES_GCM_MAX_AAD_BYTES))
+    return AES_ERR;
+
+  if (!gcm_packet_length_ok(ctx, (uint64_t)length))
     return AES_ERR;
 
   gcm_absorb(ctx, aad, length);
@@ -1271,7 +1302,8 @@ static int gcm_update(struct AES_GCM_ctx* ctx, uint8_t* buf, size_t length,
 
   if (ctx == NULL || ctx->phase == AES_GCM_PHASE_FINAL ||
       (length != 0 && buf == NULL) ||
-      !gcm_length_is_valid(ctx->text_len, length, AES_GCM_MAX_TEXT_BYTES))
+      !gcm_length_is_valid(ctx->text_len, length, AES_GCM_MAX_PLAINTEXT_BYTES) ||
+      !gcm_packet_length_ok(ctx, (uint64_t)length))
     return AES_ERR;
   if (ctx->direction != AES_GCM_DIRECTION_NONE &&
       ctx->direction != direction)
@@ -1289,7 +1321,7 @@ static int gcm_update(struct AES_GCM_ctx* ctx, uint8_t* buf, size_t length,
          ctx->ghash_len == 0)
   {
     uint8_t ciphertext[AES_BLOCKLEN];
-    unsigned j;
+    uint8_t j;
 
     gcm_increment_counter(ctx->counter);
     aes_copy_bytes(ctx->stream, ctx->counter, AES_BLOCKLEN);
@@ -1338,13 +1370,10 @@ int AES_GCM_decrypt_update(struct AES_GCM_ctx* ctx, uint8_t* buf,
   return gcm_update(ctx, buf, length, 1);
 }
 
-int AES_GCM_encrypt_finish(struct AES_GCM_ctx* ctx, uint8_t* tag,
-                           size_t tag_len)
+int AES_GCM_encrypt_finish(struct AES_GCM_ctx* ctx, uint8_t* tag)
 {
-  uint8_t full_tag[AES_BLOCKLEN];
-
-  if (ctx == NULL || tag == NULL || !gcm_tag_length_is_valid(tag_len) ||
-      ctx->phase == AES_GCM_PHASE_FINAL)
+  if (ctx == NULL || tag == NULL || ctx->phase == AES_GCM_PHASE_FINAL ||
+      !gcm_packet_length_ok(ctx, 0))
     return AES_ERR;
   if (ctx->phase == AES_GCM_PHASE_AAD)
   {
@@ -1352,21 +1381,19 @@ int AES_GCM_encrypt_finish(struct AES_GCM_ctx* ctx, uint8_t* tag,
     ctx->phase = AES_GCM_PHASE_TEXT;
   }
   gcm_finish_ghash(ctx);
-  gcm_make_tag(ctx, full_tag);
-  aes_copy_bytes(tag, full_tag, tag_len);
+  gcm_make_tag(ctx, tag);
   ctx->phase = AES_GCM_PHASE_FINAL;
   return AES_OK;
 }
 
-int AES_GCM_decrypt_finish(struct AES_GCM_ctx* ctx, const uint8_t* tag,
-                           size_t tag_len)
+int AES_GCM_decrypt_finish(struct AES_GCM_ctx* ctx, const uint8_t* tag)
 {
   uint8_t expected[AES_BLOCKLEN];
   uint8_t difference = 0;
-  size_t i;
+  uint8_t i;
 
-  if (ctx == NULL || tag == NULL || !gcm_tag_length_is_valid(tag_len) ||
-      ctx->phase == AES_GCM_PHASE_FINAL)
+  if (ctx == NULL || tag == NULL || ctx->phase == AES_GCM_PHASE_FINAL ||
+      !gcm_packet_length_ok(ctx, 0))
     return AES_ERR;
   if (ctx->phase == AES_GCM_PHASE_AAD)
   {
@@ -1375,9 +1402,12 @@ int AES_GCM_decrypt_finish(struct AES_GCM_ctx* ctx, const uint8_t* tag,
   }
   gcm_finish_ghash(ctx);
   gcm_make_tag(ctx, expected);
-  for (i = 0; i < tag_len; ++i)
+  for (i = 0; i < ctx->tag_len; ++i)
     difference |= (uint8_t)(expected[i] ^ tag[i]);
   ctx->phase = AES_GCM_PHASE_FINAL;
+#if AES_ZEROIZE
+  AES_secure_zero(expected, sizeof(expected));
+#endif
   return difference == 0 ? AES_OK : AES_ERR;
 }
 
@@ -1400,10 +1430,10 @@ int AES_GCM_encrypt(const uint8_t* key,
   if (key == NULL || iv == NULL || iv_len == 0 ||
       (aad_len != 0 && aad == NULL) ||
       (plaintext_len != 0 && (plaintext == NULL || ciphertext == NULL)) ||
-      tag == NULL || !gcm_tag_length_is_valid(tag_len))
+      tag == NULL)
     return AES_ERR;
 
-  if (AES_GCM_init(&ctx, key, iv, iv_len) != AES_OK)
+  if (AES_GCM_init(&ctx, key, iv, iv_len, tag_len) != AES_OK)
     return AES_ERR;
   if (AES_GCM_aad_update(&ctx, aad, aad_len) != AES_OK)
   {
@@ -1418,7 +1448,7 @@ int AES_GCM_encrypt(const uint8_t* key,
 
   status = AES_GCM_encrypt_update(&ctx, ciphertext, plaintext_len);
   if (status == AES_OK)
-    status = AES_GCM_encrypt_finish(&ctx, tag, tag_len);
+    status = AES_GCM_encrypt_finish(&ctx, tag);
 
 #if AES_ZEROIZE
   AES_GCM_clear(&ctx);
@@ -1436,16 +1466,16 @@ int AES_GCM_decrypt(const uint8_t* key,
   struct AES_GCM_ctx ctx;
   uint8_t expected[AES_BLOCKLEN] = { 0 };
   uint8_t difference = 0;
-  size_t i;
+  uint8_t i;
   int status = AES_ERR;
 
   if (key == NULL || iv == NULL || iv_len == 0 ||
       (aad_len != 0 && aad == NULL) ||
       (ciphertext_len != 0 && (ciphertext == NULL || plaintext == NULL)) ||
-      tag == NULL || !gcm_tag_length_is_valid(tag_len))
+      tag == NULL)
     return AES_ERR;
 
-  if (AES_GCM_init(&ctx, key, iv, iv_len) != AES_OK)
+  if (AES_GCM_init(&ctx, key, iv, iv_len, tag_len) != AES_OK)
     return AES_ERR;
   if (AES_GCM_aad_update(&ctx, aad, aad_len) != AES_OK)
     goto done;
@@ -1456,7 +1486,9 @@ int AES_GCM_decrypt(const uint8_t* key,
     gcm_pad_ghash(&ctx);
     ctx.phase = AES_GCM_PHASE_TEXT;
   }
-  if (!gcm_length_is_valid(ctx.text_len, ciphertext_len, AES_GCM_MAX_TEXT_BYTES))
+  if (!gcm_length_is_valid(ctx.text_len, ciphertext_len,
+                           AES_GCM_MAX_PLAINTEXT_BYTES) ||
+      !gcm_packet_length_ok(&ctx, (uint64_t)ciphertext_len))
     goto done;
   gcm_absorb(&ctx, ciphertext, ciphertext_len);
   ctx.text_len += (uint64_t)ciphertext_len;
@@ -1464,7 +1496,7 @@ int AES_GCM_decrypt(const uint8_t* key,
 
   gcm_finish_ghash(&ctx);
   gcm_make_tag(&ctx, expected);
-  for (i = 0; i < tag_len; ++i)
+  for (i = 0; i < ctx.tag_len; ++i)
     difference |= (uint8_t)(expected[i] ^ tag[i]);
   ctx.phase = AES_GCM_PHASE_FINAL;
 

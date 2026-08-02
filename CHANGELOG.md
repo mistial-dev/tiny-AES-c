@@ -23,7 +23,13 @@ SPDX-License-Identifier: Unlicense
   IV left unchanged).
 - EAX rejects tags shorter than `AES_EAX_MIN_TAG_LEN` (default 8) and zero-length
   tags.
-- GCM tag lengths follow NIST SP 800-38D only: 4, 8, or 12–16 bytes.
+- GCM follows NIST SP 800-38D more strictly:
+  - Tag length *t* is fixed at `AES_GCM_init(..., tag_len)` / one-shot entry
+    (not re-chosen at finish).
+  - `AES_GCM_encrypt_finish` / `AES_GCM_decrypt_finish` take only the tag buffer.
+  - Input limits: IV/AAD/P caps; short tags enforce Appendix C per-packet
+    |C|+|A| bounds. Invocation quotas and IV uniqueness remain application work
+    (no key-lifetime store on MCU).
 - No compatibility aliases are provided; update call sites.
 
 ### Added

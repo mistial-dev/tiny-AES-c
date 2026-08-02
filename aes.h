@@ -239,6 +239,25 @@ int AES_OFB_crypt(struct AES_ctx* ctx, uint8_t* buf, size_t length);
 
 #if defined(GCM) && (GCM == 1)
 
+/*
+ * NIST SP 800-38D length limits (bit lengths converted to bytes):
+ *   1 <= len(IV) <= 2^64-1 bits
+ *   len(P) <= 2^39-256 bits  =>  AES_GCM_MAX_PLAINTEXT_BYTES
+ *   len(A) <= 2^64-1 bits
+ * Tag length t (bits) is one of 128,120,112,104,96,64,32 and is fixed for the
+ * key for the life of this context (passed at init).
+ *
+ * Appendix C short-tag packet limits (most permissive table row):
+ *   t=32: |C|+|A| <= 2^10 bytes per packet
+ *   t=64: |C|+|A| <= 2^25 bytes per packet
+ * Key lifetime / max decryption invocations remain the application's duty.
+ */
+#define AES_GCM_MAX_PLAINTEXT_BYTES  ((((uint64_t)1) << 36) - 32u)
+#define AES_GCM_MAX_AAD_BYTES        (UINT64_MAX / 8u)
+#define AES_GCM_MAX_IV_BYTES         (UINT64_MAX / 8u)
+#define AES_GCM_SHORT_TAG4_MAX_PACKET  ((uint64_t)1 << 10)  /* 1024 */
+#define AES_GCM_SHORT_TAG8_MAX_PACKET  ((uint64_t)1 << 25)  /* 33554432 */
+
 struct AES_GCM_ctx
 {
   struct AES_ctx aes;
@@ -259,16 +278,18 @@ struct AES_GCM_ctx
   uint64_t text_len;
   size_t stream_pos;
   size_t ghash_len;
+  uint8_t tag_len; /* fixed for this key/context; SP 800-38D §5.2.1.2 */
   uint8_t phase;
   uint8_t direction;
 };
 
 /*
- * Initialize GCM with a key and nonce. The nonce may have any non-zero length;
- * the 96-bit form is the fast path recommended by NIST SP 800-38D.
+ * Initialize GCM. tag_len is the SP 800-38D tag length t in bytes
+ * (4, 8, or 12–16) and is fixed for this context. IV may be any supported
+ * non-zero byte length; 12 bytes (96 bits) is the recommended fast path.
  */
 int AES_GCM_init(struct AES_GCM_ctx* ctx, const uint8_t* key,
-                 const uint8_t* iv, size_t iv_len);
+                 const uint8_t* iv, size_t iv_len, size_t tag_len);
 
 /* AAD must be supplied before the first encrypt/decrypt update. A context is
  * single-direction; reinitialize before switching direction. Check every
@@ -280,17 +301,15 @@ int AES_GCM_encrypt_update(struct AES_GCM_ctx* ctx, uint8_t* buf,
 int AES_GCM_decrypt_update(struct AES_GCM_ctx* ctx, uint8_t* buf,
                            size_t length);
 
-/* Tag length must be one of 4, 8, or 12–16 bytes (NIST SP 800-38D). */
-int AES_GCM_encrypt_finish(struct AES_GCM_ctx* ctx, uint8_t* tag,
-                           size_t tag_len);
-int AES_GCM_decrypt_finish(struct AES_GCM_ctx* ctx, const uint8_t* tag,
-                           size_t tag_len);
+/* Tag buffer must hold ctx->tag_len bytes (set at init). */
+int AES_GCM_encrypt_finish(struct AES_GCM_ctx* ctx, uint8_t* tag);
+int AES_GCM_decrypt_finish(struct AES_GCM_ctx* ctx, const uint8_t* tag);
 
 /*
- * One-shot GCM. Decrypt authenticates before writing plaintext; on
- * authentication failure the plaintext buffer is left untouched when it does
- * not alias the ciphertext, and is zeroed when the buffers alias in place.
- * Prefer these helpers over the streaming API when the full message is known.
+ * One-shot GCM. tag_len is fixed for this key use (SP 800-38D). Decrypt
+ * authenticates before writing plaintext; on authentication failure a
+ * non-aliasing plaintext buffer is left untouched and an in-place buffer is
+ * zeroed. Prefer these helpers when the full message is known.
  */
 int AES_GCM_encrypt(const uint8_t* key,
                     const uint8_t* iv, size_t iv_len,

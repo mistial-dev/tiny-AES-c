@@ -116,13 +116,13 @@ int  AES_CTR_crypt(struct AES_ctx *ctx, uint8_t *buf, size_t len);
 int  AES_OFB_crypt(struct AES_ctx *ctx, uint8_t *buf, size_t len);
 
 int  AES_GCM_init(struct AES_GCM_ctx *ctx, const uint8_t *key,
-                  const uint8_t *iv, size_t iv_len);
+                  const uint8_t *iv, size_t iv_len, size_t tag_len);
 int  AES_GCM_aad_update(...);
 int  AES_GCM_encrypt_update(...);
 int  AES_GCM_decrypt_update(...);
-int  AES_GCM_encrypt_finish(...);
-int  AES_GCM_decrypt_finish(...);
-int  AES_GCM_encrypt(...);  /* one-shot */
+int  AES_GCM_encrypt_finish(struct AES_GCM_ctx *ctx, uint8_t *tag);
+int  AES_GCM_decrypt_finish(struct AES_GCM_ctx *ctx, const uint8_t *tag);
+int  AES_GCM_encrypt(...);  /* one-shot; tag_len fixed for that key use */
 int  AES_GCM_decrypt(...);  /* one-shot, auth-before-release */
 void AES_GCM_clear(struct AES_GCM_ctx *ctx);
 
@@ -215,16 +215,20 @@ if (AES_GCM_decrypt(key, iv, iv_len, aad, aad_len, ct, pt_len,
 
 ```c
 struct AES_GCM_ctx gctx;
-AES_GCM_init(&gctx, key, iv, iv_len);
+/* tag_len is fixed for this key/context (SP 800-38D §5.2.1.2). */
+AES_GCM_init(&gctx, key, iv, iv_len, 16);
 AES_GCM_aad_update(&gctx, aad, aad_len);
 AES_GCM_encrypt_update(&gctx, buf, len);
-AES_GCM_encrypt_finish(&gctx, tag, tag_len);
+AES_GCM_encrypt_finish(&gctx, tag); /* tag must hold gctx.tag_len bytes */
 AES_GCM_clear(&gctx);
 ```
 
 **Streaming decrypt** writes candidate plaintext before the tag is checked.
 Do not act on that buffer until `AES_GCM_decrypt_finish` returns `AES_OK`.
 Prefer one-shot decrypt when the full ciphertext is available.
+
+On tiny MCUs prefer: 16-byte tags, 12-byte IVs, one-shot GCM, and
+`AES_TINY=1` with bitwise/auto GHASH (never table4 without shared table).
 
 ## RTOS and concurrency
 
@@ -247,9 +251,12 @@ Prefer one-shot decrypt when the full ciphertext is available.
 - CBC rejects non-aligned lengths with `AES_ERR`. CTR rejects requests that
   would wrap the 128-bit counter (buffer and IV left unchanged).
 - EAX tags must be at least 8 bytes by default (library policy, not NIST GCM).
-- GCM tags must be one of **4, 8, or 12–16** bytes (NIST SP 800-38D §5.2.1.2).
-  Sixteen is the usual choice; 4- and 8-byte tags have extra limits in
-  Appendix C and are weak for general use.
+- **GCM (SP 800-38D):** tag length *t* is fixed at `AES_GCM_init` / one-shot
+  entry and must be 4, 8, or 12–16 bytes. Input length caps match the standard
+  (`AES_GCM_MAX_*`). Short tags (4/8) enforce Appendix C **per-packet**
+  |C|+|A| bounds (most permissive table row). **Key lifetime / max decryption
+  invocations** for short tags and IV uniqueness are **not** tracked in RAM —
+  the firmware must rotate keys and generate IVs correctly.
 - EAX′ uses the fixed four-byte C12.22 tag by specification.
 - Default S-box access uses fixed-size masked scans to reduce cache-timing
   leakage. Constant-time behaviour still depends on the compiler and CPU.
