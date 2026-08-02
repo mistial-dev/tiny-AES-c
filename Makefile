@@ -15,6 +15,7 @@ AES_ENABLE_GCM ?= 0
 AES_ENABLE_CCM ?= 0
 AES_ENABLE_EAX ?= 0
 AES_ENABLE_EAX_PRIME ?= 0
+AES_ENABLE_SIV ?= 0
 AES_CAVP ?= 0
 AES_ZEROIZE ?= 1
 AES_STRICT ?= 0
@@ -45,7 +46,8 @@ endif
 
 MODE_DEFINITIONS = -DCBC=$(AES_ENABLE_CBC) -DECB=$(AES_ENABLE_ECB) \
   -DCTR=$(AES_ENABLE_CTR) -DOFB=$(AES_ENABLE_OFB) -DGCM=$(AES_ENABLE_GCM) \
-  -DCCM=$(AES_ENABLE_CCM) -DEAX=$(AES_ENABLE_EAX) -DEAX_PRIME=$(AES_ENABLE_EAX_PRIME)
+  -DCCM=$(AES_ENABLE_CCM) -DEAX=$(AES_ENABLE_EAX) -DEAX_PRIME=$(AES_ENABLE_EAX_PRIME) \
+  -DSIV=$(AES_ENABLE_SIV)
 ifeq ($(AES_GCM_GHASH_MODE),auto)
 GHASH_DEFINITION = -DAES_GCM_GHASH_MODE=0
 GHASH_MODE = 0
@@ -93,18 +95,21 @@ benchmark: benchmark.c aes.c aes.h
 test:
 	@set -e; \
 	mkdir -p $(TEST_BUILD_DIR); \
-	$(CC) $(CFLAGS) -UCBC -UECB -UCTR -UOFB -UGCM -UCCM -UEAX -UAES_CAVP -UAES_GCM_GHASH_MODE -c munit.c -o $(TEST_BUILD_DIR)/munit.o; \
+	$(CC) $(CFLAGS) -UCBC -UECB -UCTR -UOFB -UGCM -UCCM -UEAX -USIV -UAES_CAVP -UAES_GCM_GHASH_MODE -c munit.c -o $(TEST_BUILD_DIR)/munit.o; \
 	build_and_run() { \
 	  key=$$1; mode=$$2; cbc=$$3; ecb=$$4; ctr=$$5; ofb=$$6; gcm=$$7; ccm=$$8; eax=$$9; ghash=$${10}; sbox=$${11}; wide=$${12}; \
-	  prime=0; if [ "$${mode}" = eax-prime ]; then prime=1; fi; \
-	  name=$${key}-$${mode}-gcm$${gcm}-ccm$${ccm}-eax$${eax}-eaxprime$${prime}-ghash$${ghash}-sbox$${sbox}-wide$${wide}-cavp$(AES_CAVP); \
-	  common="$(CFLAGS) -DCBC=$${cbc} -DECB=$${ecb} -DCTR=$${ctr} -DOFB=$${ofb} -DGCM=$${gcm} -DCCM=$${ccm} -DEAX=$${eax} -DEAX_PRIME=$${prime} -DAES_CAVP=$(AES_CAVP) -DAES$${key}=1 -DAES_SBOX_MODE=$${sbox} -DAES_WIDE_OPS=$${wide} -DAES_GCM_GHASH_MODE=$${ghash} -DCAVP_VECTOR_DIR=\"test_vectors/cavp\" -DEAX_VECTOR_FILE=\"test_vectors/eax/aes_eax_test.json\""; \
+	  prime=0; siv=0; \
+	  if [ "$${mode}" = eax-prime ]; then prime=1; fi; \
+	  if [ "$${mode}" = siv ]; then siv=1; fi; \
+	  name=$${key}-$${mode}-gcm$${gcm}-ccm$${ccm}-eax$${eax}-eaxprime$${prime}-siv$${siv}-ghash$${ghash}-sbox$${sbox}-wide$${wide}-cavp$(AES_CAVP); \
+	  common="$(CFLAGS) -DCBC=$${cbc} -DECB=$${ecb} -DCTR=$${ctr} -DOFB=$${ofb} -DGCM=$${gcm} -DCCM=$${ccm} -DEAX=$${eax} -DEAX_PRIME=$${prime} -DSIV=$${siv} -DAES_CAVP=$(AES_CAVP) -DAES$${key}=1 -DAES_SBOX_MODE=$${sbox} -DAES_WIDE_OPS=$${wide} -DAES_GCM_GHASH_MODE=$${ghash} -DCAVP_VECTOR_DIR=\"test_vectors/cavp\" -DEAX_VECTOR_FILE=\"test_vectors/eax/aes_eax_test.json\" -DSIV_VECTOR_FILE=\"test_vectors/siv/aead_aes_siv_cmac_test.json\""; \
 	  if [ "$${ghash}" = 5 ]; then common="$${common} -DAES_GCM_GHASH_HARDWARE_MULTIPLY=AES_CAVP_GHASH_HARDWARE_MULTIPLY"; fi; \
 	  $(CC) $${common} -c aes.c -o $(TEST_BUILD_DIR)/aes-$${name}.o; \
 	  $(CC) $${common} -c test.c -o $(TEST_BUILD_DIR)/test-$${name}.o; \
 	  $(CC) $${common} -c cavp.c -o $(TEST_BUILD_DIR)/cavp-$${name}.o; \
 	  $(CC) $${common} -c eax_test.c -o $(TEST_BUILD_DIR)/eax-test-$${name}.o; \
-	  $(CC) $(CFLAGS) -o $(TEST_BUILD_DIR)/test-$${name} $(TEST_BUILD_DIR)/aes-$${name}.o $(TEST_BUILD_DIR)/test-$${name}.o $(TEST_BUILD_DIR)/cavp-$${name}.o $(TEST_BUILD_DIR)/eax-test-$${name}.o $(TEST_BUILD_DIR)/munit.o; \
+	  $(CC) $${common} -c siv_test.c -o $(TEST_BUILD_DIR)/siv-test-$${name}.o; \
+	  $(CC) $(CFLAGS) -o $(TEST_BUILD_DIR)/test-$${name} $(TEST_BUILD_DIR)/aes-$${name}.o $(TEST_BUILD_DIR)/test-$${name}.o $(TEST_BUILD_DIR)/cavp-$${name}.o $(TEST_BUILD_DIR)/eax-test-$${name}.o $(TEST_BUILD_DIR)/siv-test-$${name}.o $(TEST_BUILD_DIR)/munit.o; \
 	  $(TEST_BUILD_DIR)/test-$${name}; \
 	}; \
 	for key in 128 192 256; do \
@@ -116,6 +121,7 @@ test:
 	  for profile in "1 0 0" "1 1 0" "1 0 1" "1 1 2" "1 0 3" "1 0 4" "1 0 5" "2 0 0" "3 0 0"; do set -- $$profile; build_and_run $$key gcm 0 0 0 0 1 0 0 $$3 $$1 $$2; done; \
 	  for sbox in 1 2 3; do build_and_run $$key eax 0 0 0 0 0 0 1 0 $$sbox 0; done; \
 	  if [ "$$key" -eq 128 ]; then for sbox in 1 2 3; do build_and_run $$key eax-prime 0 0 0 0 0 0 0 0 $$sbox 0; done; fi; \
+	  for sbox in 1 2 3; do build_and_run $$key siv 0 0 0 0 0 0 0 0 $$sbox 0; done; \
 	  if [ "$(AES_CAVP)" -eq 0 ]; then build_and_run $$key all 1 1 1 1 1 1 1 0 1 1; fi; \
 	done
 

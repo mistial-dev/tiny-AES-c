@@ -29,6 +29,7 @@ so unused algorithms do not contribute code or context fields:
 | EAX | off | One-shot AEAD |
 | EAX′ | off | ANSI C12.22 authenticated encryption |
 | GCM | off | Streaming AEAD plus one-shot helpers |
+| SIV | off | Deterministic / nonce-misuse-resistant AEAD (RFC 5297) |
 
 Key size is fixed at compile time: define `AES192` or `AES256`, otherwise
 AES-128 is selected.
@@ -132,6 +133,14 @@ int  AES_EAX_encrypt(...);
 int  AES_EAX_decrypt(...);
 int  AES_EAX_PRIME_encrypt(...);
 int  AES_EAX_PRIME_decrypt(...);
+
+/* SIV=1: key length is 2×AES_KEYLEN; V is a 16-byte synthetic IV. */
+int  AES_SIV_encrypt(const uint8_t *key,
+                     const uint8_t *const *ad, const size_t *ad_lens,
+                     size_t ad_count,
+                     const uint8_t *pt, size_t pt_len,
+                     uint8_t v[16], uint8_t *ct);
+int  AES_SIV_decrypt(...);
 ```
 
 C++ projects should include `aes.hpp`.
@@ -196,6 +205,20 @@ if (AES_EAX_decrypt(key, nonce, nlen, aad, alen, ct, clen, tag, tlen, pt)
     != AES_OK) {
     /* authentication failed; pt unchanged */
 }
+```
+
+### SIV (RFC 5297, one-shot)
+
+```c
+/* key is AES_SIV_KEYLEN (2×AES_KEYLEN) bytes: K1||K2 for CMAC and CTR. */
+const uint8_t *ad[2] = { aad, nonce }; /* empty aad still counts as a component */
+size_t ad_lens[2] = { aad_len, nonce_len };
+uint8_t v[AES_SIV_V_LEN];
+uint8_t ct[pt_len];
+
+if (AES_SIV_encrypt(key, ad, ad_lens, 2, pt, pt_len, v, ct) != AES_OK)
+    return -1;
+/* Auth failure wipes the plaintext buffer (no large temp on MCU). */
 ```
 
 ### GCM one-shot (preferred for whole messages)

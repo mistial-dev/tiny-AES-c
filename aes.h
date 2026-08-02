@@ -16,8 +16,8 @@
 /*
  * Mode selection (define to 1/0 before including this header, or via -D).
  *
- * Default build enables CTR only. CBC, ECB, OFB, CCM, EAX, EAX_PRIME, and GCM
- * are opt-in so unused modes do not contribute code or context fields.
+ * Default build enables CTR only. CBC, ECB, OFB, CCM, EAX, EAX_PRIME, GCM,
+ * and SIV are opt-in so unused modes do not contribute code or context fields.
  */
 #ifndef CBC
   #define CBC 0
@@ -49,6 +49,10 @@
 
 #ifndef EAX_PRIME
   #define EAX_PRIME 0
+#endif
+
+#ifndef SIV
+  #define SIV 0
 #endif
 
 /* When 1 (default), one-shot paths wipe stack key material on exit. */
@@ -372,6 +376,36 @@ int AES_EAX_PRIME_decrypt(const uint8_t* key, const uint8_t* cleartext,
                           size_t ciphertext_len,
                           const uint8_t tag[AES_EAX_PRIME_TAG_LEN],
                           uint8_t* plaintext);
+
+#endif
+
+#if defined(SIV) && (SIV == 1)
+
+/* RFC 5297 SIV-AES: key is two equal AES keys concatenated (CMAC || CTR). */
+#define AES_SIV_KEYLEN   (AES_KEYLEN * 2)
+#define AES_SIV_V_LEN    AES_BLOCKLEN
+/* RFC §7: at most 126 associated-data components (plaintext is the last S2V input). */
+#define AES_SIV_MAX_AD   126u
+
+/*
+ * One-shot SIV (RFC 5297). Associated data is a vector of 0..AES_SIV_MAX_AD
+ * components (empty components are valid). v is the 16-byte synthetic IV.
+ * Ciphertext length equals plaintext length. Decrypt writes candidate
+ * plaintext then verifies; on authentication failure the output is wiped
+ * (MCU-friendly; no large temp buffer).
+ */
+int AES_SIV_encrypt(const uint8_t* key,
+                    const uint8_t* const* ad, const size_t* ad_lens,
+                    size_t ad_count,
+                    const uint8_t* plaintext, size_t plaintext_len,
+                    uint8_t v[AES_SIV_V_LEN],
+                    uint8_t* ciphertext);
+int AES_SIV_decrypt(const uint8_t* key,
+                    const uint8_t* const* ad, const size_t* ad_lens,
+                    size_t ad_count,
+                    const uint8_t v[AES_SIV_V_LEN],
+                    const uint8_t* ciphertext, size_t ciphertext_len,
+                    uint8_t* plaintext);
 
 #endif
 

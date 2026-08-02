@@ -94,6 +94,9 @@ MunitResult test_eax(const MunitParameter params[], void* data);
 #if defined(EAX_PRIME) && (EAX_PRIME == 1)
 MunitResult test_eax_prime(const MunitParameter params[], void* data);
 #endif
+#if defined(SIV) && (SIV == 1)
+MunitResult test_siv(const MunitParameter params[], void* data);
+#endif
 
 static MunitResult test_key_schedule(const MunitParameter params[], void* data)
 {
@@ -813,6 +816,9 @@ static MunitTest test_suite_tests[] = {
 #endif
 #if defined(EAX_PRIME) && (EAX_PRIME == 1)
   { "/eax-prime", test_eax_prime, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
+#endif
+#if defined(SIV) && (SIV == 1)
+  { "/siv", test_siv, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL },
 #endif
   { NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL }
 };

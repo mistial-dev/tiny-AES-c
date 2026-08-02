@@ -84,8 +84,9 @@ NOTE:   String length must be evenly divisible by 16byte (str_len % 16 == 0)
     (defined(GCM) && GCM == 1) || (defined(CCM) && CCM == 1) || \
     (defined(EAX) && EAX == 1) || \
     (defined(EAX_PRIME) && EAX_PRIME == 1) || \
+    (defined(SIV) && SIV == 1) || \
     (defined(AES_CAVP) && AES_CAVP == 1)
-// state - array holding the intermediate results during encryption/decryption.
+/* state - intermediate AES state during encryption/decryption. */
 typedef uint8_t state_t[4][4];
 #endif
 
@@ -408,9 +409,10 @@ void AES_ctx_set_iv(struct AES_ctx* ctx, const uint8_t* iv)
     (defined(GCM) && GCM == 1) || (defined(CCM) && CCM == 1) || \
     (defined(EAX) && EAX == 1) || \
     (defined(EAX_PRIME) && EAX_PRIME == 1) || \
+    (defined(SIV) && SIV == 1) || \
     (defined(AES_CAVP) && AES_CAVP == 1)
 
-// This function adds the round key to state.
+/* This function adds the round key to state. */
 // The round key is added to the state by an XOR function.
 static void AddRoundKey(uint8_t round, state_t* state, const uint8_t* RoundKey)
 {
@@ -2145,3 +2147,300 @@ int AES_EAX_PRIME_decrypt(const uint8_t* key, const uint8_t* cleartext,
 #endif /* EAX_PRIME */
 
 #endif // EAX or EAX_PRIME
+
+#if defined(SIV) && (SIV == 1)
+
+/* RFC 5297 dbl(): left-shift in GF(2^128), poly x^128+x^7+x^2+x+1. */
+static void siv_dbl(uint8_t value[AES_BLOCKLEN])
+{
+  uint8_t carry = 0;
+  uint8_t i;
+
+  for (i = AES_BLOCKLEN; i > 0; --i)
+  {
+    const uint8_t offset = (uint8_t)(i - 1u);
+    const uint8_t next = (uint8_t)(value[offset] >> 7);
+    value[offset] = (uint8_t)((value[offset] << 1) | carry);
+    carry = next;
+  }
+  value[AES_BLOCKLEN - 1u] ^= (uint8_t)(0x87u & (uint8_t)(0u - carry));
+}
+
+/*
+ * AES-CMAC (SP 800-38B) over the concatenation of two segments without a
+ * heap copy. Second segment may be empty (b_len == 0).
+ */
+static void siv_cmac_concat(const uint8_t* round_key,
+                            const uint8_t* a, size_t a_len,
+                            const uint8_t* b, size_t b_len,
+                            uint8_t out[AES_BLOCKLEN])
+{
+  uint8_t L[AES_BLOCKLEN] = { 0 };
+  uint8_t K1[AES_BLOCKLEN];
+  uint8_t K2[AES_BLOCKLEN];
+  uint8_t mac[AES_BLOCKLEN] = { 0 };
+  uint8_t block[AES_BLOCKLEN];
+  size_t total = a_len + b_len;
+  size_t pos = 0;
+  uint8_t i;
+
+  Cipher((state_t*)L, round_key);
+  aes_copy_bytes(K1, L, AES_BLOCKLEN);
+  siv_dbl(K1);
+  aes_copy_bytes(K2, K1, AES_BLOCKLEN);
+  siv_dbl(K2);
+
+  if (total == 0)
+  {
+    memset(block, 0, AES_BLOCKLEN);
+    block[0] = 0x80;
+    for (i = 0; i < AES_BLOCKLEN; ++i)
+      block[i] ^= K2[i];
+    for (i = 0; i < AES_BLOCKLEN; ++i)
+      mac[i] ^= block[i];
+    Cipher((state_t*)mac, round_key);
+    aes_copy_bytes(out, mac, AES_BLOCKLEN);
+    goto done;
+  }
+
+  while (total - pos > AES_BLOCKLEN)
+  {
+    for (i = 0; i < AES_BLOCKLEN; ++i)
+    {
+      const size_t p = pos + i;
+      const uint8_t byte = (p < a_len) ? a[p] : b[p - a_len];
+      mac[i] ^= byte;
+    }
+    Cipher((state_t*)mac, round_key);
+    pos += AES_BLOCKLEN;
+  }
+
+  {
+    const size_t rem = total - pos;
+    memset(block, 0, AES_BLOCKLEN);
+    for (i = 0; i < (uint8_t)rem; ++i)
+    {
+      const size_t p = pos + i;
+      block[i] = (p < a_len) ? a[p] : b[p - a_len];
+    }
+    if (rem == AES_BLOCKLEN)
+    {
+      for (i = 0; i < AES_BLOCKLEN; ++i)
+        block[i] ^= K1[i];
+    }
+    else
+    {
+      block[rem] = 0x80;
+      for (i = 0; i < AES_BLOCKLEN; ++i)
+        block[i] ^= K2[i];
+    }
+  }
+
+  for (i = 0; i < AES_BLOCKLEN; ++i)
+    mac[i] ^= block[i];
+  Cipher((state_t*)mac, round_key);
+  aes_copy_bytes(out, mac, AES_BLOCKLEN);
+
+done:
+#if AES_ZEROIZE
+  AES_secure_zero(L, sizeof(L));
+  AES_secure_zero(K1, sizeof(K1));
+  AES_secure_zero(K2, sizeof(K2));
+  AES_secure_zero(mac, sizeof(mac));
+  AES_secure_zero(block, sizeof(block));
+#endif
+}
+
+static void siv_cmac(const uint8_t* round_key, const uint8_t* data,
+                     size_t length, uint8_t out[AES_BLOCKLEN])
+{
+  siv_cmac_concat(round_key, data, length, NULL, 0, out);
+}
+
+static void siv_s2v(const uint8_t* k1_round, const uint8_t* const* ad,
+                    const size_t* ad_lens, size_t ad_count,
+                    const uint8_t* last, size_t last_len,
+                    uint8_t v[AES_BLOCKLEN])
+{
+  uint8_t d[AES_BLOCKLEN];
+  uint8_t tmp[AES_BLOCKLEN];
+  uint8_t last_block[AES_BLOCKLEN];
+  size_t i;
+  const uint8_t zero[AES_BLOCKLEN] = { 0 };
+
+  siv_cmac(k1_round, zero, AES_BLOCKLEN, d);
+  for (i = 0; i < ad_count; ++i)
+  {
+    uint8_t j;
+    siv_cmac(k1_round, ad[i] != NULL ? ad[i] : zero, ad_lens[i], tmp);
+    siv_dbl(d);
+    for (j = 0; j < AES_BLOCKLEN; ++j)
+      d[j] ^= tmp[j];
+  }
+
+  if (last_len >= AES_BLOCKLEN)
+  {
+    /* T = last xorend D = prefix || (suffix xor D); CMAC(T). */
+    aes_copy_bytes(last_block, last + (last_len - AES_BLOCKLEN), AES_BLOCKLEN);
+    for (i = 0; i < AES_BLOCKLEN; ++i)
+      last_block[i] ^= d[i];
+    siv_cmac_concat(k1_round, last, last_len - AES_BLOCKLEN,
+                    last_block, AES_BLOCKLEN, v);
+  }
+  else
+  {
+    /* T = dbl(D) xor pad(last); single-block CMAC input. */
+    uint8_t t[AES_BLOCKLEN];
+    uint8_t j;
+    aes_copy_bytes(t, d, AES_BLOCKLEN);
+    siv_dbl(t);
+    memset(tmp, 0, AES_BLOCKLEN);
+    if (last_len != 0 && last != NULL)
+      aes_copy_bytes(tmp, last, last_len);
+    tmp[last_len] = 0x80;
+    for (j = 0; j < AES_BLOCKLEN; ++j)
+      t[j] ^= tmp[j];
+    siv_cmac(k1_round, t, AES_BLOCKLEN, v);
+#if AES_ZEROIZE
+    AES_secure_zero(t, sizeof(t));
+#endif
+  }
+
+#if AES_ZEROIZE
+  AES_secure_zero(d, sizeof(d));
+  AES_secure_zero(tmp, sizeof(tmp));
+  AES_secure_zero(last_block, sizeof(last_block));
+#endif
+}
+
+static void siv_ctr(const uint8_t* k2_round, const uint8_t v[AES_BLOCKLEN],
+                    const uint8_t* input, uint8_t* output, size_t length)
+{
+  uint8_t counter[AES_BLOCKLEN];
+  uint8_t stream[AES_BLOCKLEN];
+  size_t offset = 0;
+  uint8_t i;
+
+  aes_copy_bytes(counter, v, AES_BLOCKLEN);
+  /* Clear bit 63 and bit 31 (rightmost bit is bit 0). */
+  counter[8] &= 0x7fu;
+  counter[12] &= 0x7fu;
+
+  while (offset < length)
+  {
+    const size_t count = length - offset < AES_BLOCKLEN ?
+                         length - offset : AES_BLOCKLEN;
+    aes_copy_bytes(stream, counter, AES_BLOCKLEN);
+    Cipher((state_t*)stream, k2_round);
+    for (i = 0; i < (uint8_t)count; ++i)
+      output[offset + i] = (uint8_t)(input[offset + i] ^ stream[i]);
+
+    /* 128-bit big-endian increment (safe after bit clears for small messages). */
+    for (i = AES_BLOCKLEN; i > 0; --i)
+    {
+      if (++counter[i - 1u] != 0)
+        break;
+    }
+    offset += count;
+  }
+
+#if AES_ZEROIZE
+  AES_secure_zero(counter, sizeof(counter));
+  AES_secure_zero(stream, sizeof(stream));
+#endif
+}
+
+static int siv_crypt(const uint8_t* key, const uint8_t* const* ad,
+                     const size_t* ad_lens, size_t ad_count,
+                     const uint8_t* input, size_t input_len,
+                     uint8_t* output, uint8_t v[AES_SIV_V_LEN], int decrypt)
+{
+  struct {
+    struct AES_ctx k1;
+    struct AES_ctx k2;
+    uint8_t computed[AES_BLOCKLEN];
+  } st;
+  size_t i;
+  int status = AES_ERR;
+
+  if (key == NULL || (ad_count != 0 && (ad == NULL || ad_lens == NULL)) ||
+      ad_count > AES_SIV_MAX_AD ||
+      (input_len != 0 && (input == NULL || output == NULL)) || v == NULL)
+    return AES_ERR;
+
+  for (i = 0; i < ad_count; ++i)
+  {
+    if (ad_lens[i] != 0 && ad[i] == NULL)
+      return AES_ERR;
+  }
+
+  AES_init_ctx(&st.k1, key);
+  AES_init_ctx(&st.k2, key + AES_KEYLEN);
+
+  if (decrypt)
+  {
+    siv_ctr(st.k2.RoundKey, v, input, output, input_len);
+    siv_s2v(st.k1.RoundKey, ad, ad_lens, ad_count, output, input_len,
+            st.computed);
+    {
+      uint8_t difference = 0;
+      uint8_t j;
+      for (j = 0; j < AES_BLOCKLEN; ++j)
+        difference |= (uint8_t)(st.computed[j] ^ v[j]);
+      if (difference != 0)
+      {
+        if (output != NULL && input_len != 0)
+          memset(output, 0, input_len);
+        status = AES_ERR;
+      }
+      else
+        status = AES_OK;
+    }
+  }
+  else
+  {
+    siv_s2v(st.k1.RoundKey, ad, ad_lens, ad_count, input, input_len, v);
+    siv_ctr(st.k2.RoundKey, v, input, output, input_len);
+    status = AES_OK;
+  }
+
+#if AES_ZEROIZE
+  AES_secure_zero(&st, sizeof(st));
+#endif
+  return status;
+}
+
+int AES_SIV_encrypt(const uint8_t* key,
+                    const uint8_t* const* ad, const size_t* ad_lens,
+                    size_t ad_count,
+                    const uint8_t* plaintext, size_t plaintext_len,
+                    uint8_t v[AES_SIV_V_LEN],
+                    uint8_t* ciphertext)
+{
+  return siv_crypt(key, ad, ad_lens, ad_count, plaintext, plaintext_len,
+                   ciphertext, v, 0);
+}
+
+int AES_SIV_decrypt(const uint8_t* key,
+                    const uint8_t* const* ad, const size_t* ad_lens,
+                    size_t ad_count,
+                    const uint8_t v[AES_SIV_V_LEN],
+                    const uint8_t* ciphertext, size_t ciphertext_len,
+                    uint8_t* plaintext)
+{
+  uint8_t local_v[AES_SIV_V_LEN];
+
+  if (v == NULL)
+    return AES_ERR;
+  aes_copy_bytes(local_v, v, AES_SIV_V_LEN);
+  {
+    const int status = siv_crypt(key, ad, ad_lens, ad_count, ciphertext,
+                                 ciphertext_len, plaintext, local_v, 1);
+#if AES_ZEROIZE
+    AES_secure_zero(local_v, sizeof(local_v));
+#endif
+    return status;
+  }
+}
+
+#endif /* SIV */
